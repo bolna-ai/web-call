@@ -4,6 +4,7 @@ class BolnaWebCalling {
     this.agentId = config.agentId;
     this.accessToken = config.accessToken;
     this.websocketHost = config.websocketHost;
+    this.contextData = config.contextData || {};
     
     // State variables
     this.isWebCallOngoing = false;
@@ -112,7 +113,7 @@ class BolnaWebCalling {
     this.isWebCallOngoing = true;
     this.onCallStateChange(true);
     
-    const url = `${this.websocketHost}/web-call/v1/${this.agentId}?auth_token=${this.accessToken}&user_agent=web-call&enforce_streaming=true&context_data={}`;
+    const url = `${this.websocketHost}/web-call/v1/${this.agentId}?auth_token=${this.accessToken}&user_agent=web-call&enforce_streaming=true&context_data=${JSON.stringify(this.contextData)}`;
     console.log(`Starting call ${url}`);
 
     const performWebsocketCloseEvents = (stream, processor) => {
