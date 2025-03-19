@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebCalling Library Example</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      max-width: 600px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    
+    .container {
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      padding: 20px;
+      margin-top: 30px;
+    }
+    
+    h1 {
+      color: #333;
+    }
+    
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: bold;
+    }
+    
+    input {
+      width: 100%;
+      padding: 8px;
+      margin-bottom: 15px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+    
+    .button {
+      width: 100%;
+      padding: 10px;
+      border-radius: 8px;
+      border: 1px solid #ccc;
+      cursor: pointer;
+      text-align: center;
+      font-size: 16px;
+    }
+    
+    .button-active {
+      background-color: #ef4444;
+      border-color: #ef4444;
+      color: white;
+    }
+    
+    .button-connecting {
+      opacity: 0.7;
+    }
+    
+    .status {
+      margin-top: 15px;
+      padding: 10px;
+      border-radius: 4px;
+      background-color: #f3f4f6;
+    }
+  </style>
+</head>
+<body>
+  <h1>WebCalling Library Demo</h1>
+  
+  <div class="container">
+    <label for="agent-id">Agent ID:</label>
+    <input type="text" id="agent-id" placeholder="Enter agent ID">
+    
+    <label for="access-token">Access Token:</label>
+    <input type="text" id="access-token" placeholder="Enter access token">
+    
+    <label for="websocket-host">Websocket Host:</label>
+    <input type="text" id="websocket-host" placeholder="wss://example.com">
+    
+    <button id="call-button" class="button">Start Call</button>
+    
+    <div id="status" class="status">Status: Idle</div>
+  </div>
+
+  <!-- Import the WebCalling library -->
+  <script src="../bolna-webcall-library.js"></script>
+  
+  <script>
+    // Get DOM elements
+    const agentIdInput = document.getElementById('agent-id');
+    const accessTokenInput = document.getElementById('access-token');
+    const websocketHostInput = document.getElementById('websocket-host');
+    const callButton = document.getElementById('call-button');
+    const statusDiv = document.getElementById('status');
+    
+    // Initialize variables
+    let webCalling = null;
+    
+    // Create a function to initialize the WebCalling instance
+    function initializeWebCalling() {
+      // Create new instance with current values
+      webCalling = new BolnaWebCalling({
+        agentId: agentIdInput.value,
+        accessToken: accessTokenInput.value,
+        websocketHost: websocketHostInput.value,
+        
+        // Callbacks
+        onCallStateChange: (isActive) => {
+          updateUI(isActive, webCalling.isConnected());
+        },
+        onFirstAudioPacket: () => {
+          updateUI(true, true);
+        },
+        onError: (type, error) => {
+          console.log(`Error: ${type} - ${error.message || 'Unknown error'}`);
+        }
+      });
+    }
+    
+    // Update UI based on call state
+    function updateUI(isActive, isConnected) {
+      if (isActive) {
+        callButton.textContent = isConnected ? 'End Call' : 'Connecting...';
+        callButton.className = isConnected ? 'button button-active' : 'button button-connecting';
+        statusDiv.textContent = isConnected ? 'Status: Connected' : 'Status: Connecting...';
+      } else {
+        callButton.textContent = 'Start Call';
+        callButton.className = 'button';
+        statusDiv.textContent = 'Status: Idle';
+      }
+    }
+    
+    // Handle button click
+    callButton.addEventListener('click', () => {
+      if (!webCalling) {
+        initializeWebCalling();
+      }
+      
+      if (webCalling.isCallActive()) {
+        webCalling.endWebCall();
+      } else {
+        webCalling.initiateWebCall();
+      }
+    });
+    
+    // Set some default values
+    websocketHostInput.value = '';
+    agentIdInput.value = '';
+    accessTokenInput.value = '';
+  </script>
+</body>
+</html>
