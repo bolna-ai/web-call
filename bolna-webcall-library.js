@@ -266,18 +266,18 @@ class BolnaWebCalling {
     }
     return result;
   }
-}
-
-function replaceNewlinesInObject(obj) {
-  let newObj = {};
-  for (let key in obj) {
-      if (obj.hasOwnProperty(key) && typeof obj[key] === 'string') {
-          newObj[key] = obj[key].replace(/\n/g, "\\n");
-      } else {
-          newObj[key] = obj[key];
-      }
+  
+  replaceNewlinesInObject(obj) {
+    let newObj = {};
+    for (let key in obj) {
+        if (obj.hasOwnProperty(key) && typeof obj[key] === 'string') {
+            newObj[key] = obj[key].replace(/\n/g, "\\n");
+        } else {
+            newObj[key] = obj[key];
+        }
+    }
+    return newObj;
   }
-  return newObj;
 }
 
 // Simple Queue implementation
