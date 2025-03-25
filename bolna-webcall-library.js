@@ -109,11 +109,20 @@ class BolnaWebCalling {
       console.log('Call already in progress');
       return;
     }
+
+    let encodedData = '';
+    try {
+      this.contextData = replaceNewlinesInObject(this.contextData);
+      encodedData = encodeURIComponent(JSON.stringify(this.contextData));
+    } catch (error) {
+      console.error('Error encoding context data:', error);
+      return;
+    }
     
     this.isWebCallOngoing = true;
     this.onCallStateChange(true);
     
-    const url = `${this.websocketHost}/web-call/v1/${this.agentId}?auth_token=${this.accessToken}&user_agent=web-call&enforce_streaming=true&context_data=${JSON.stringify(this.contextData)}`;
+    const url = `${this.websocketHost}/web-call/v1/${this.agentId}?auth_token=${this.accessToken}&user_agent=web-call&enforce_streaming=true&context_data=${encodedData}`;
     console.log(`Starting call ${url}`);
 
     const performWebsocketCloseEvents = (stream, processor) => {
@@ -257,6 +266,18 @@ class BolnaWebCalling {
     }
     return result;
   }
+}
+
+function replaceNewlinesInObject(obj) {
+  let newObj = {};
+  for (let key in obj) {
+      if (obj.hasOwnProperty(key) && typeof obj[key] === 'string') {
+          newObj[key] = obj[key].replace(/\n/g, "\\n");
+      } else {
+          newObj[key] = obj[key];
+      }
+  }
+  return newObj;
 }
 
 // Simple Queue implementation
