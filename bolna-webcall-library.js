@@ -11,6 +11,7 @@ class BolnaWebCalling {
     this.isFirstAudioPacketReceived = false;
     this.websocket = null;
     this.outputAudioBufferSourceNode = null;
+    this.isAcknowledgementReceived = false;
     this.audioOutputContext = new window.AudioContext();
     
     // Constants
@@ -96,11 +97,39 @@ class BolnaWebCalling {
     }
   }
 
+  sendInitPacket() {
+    const filteredUserData = {};
+    if (this.contextData) {
+      for (const key in this.contextData) {
+        if (this.contextData[key] !== '') {
+          filteredUserData[key] = this.contextData[key];
+        }
+      }
+    }
+
+    const initPacket = {
+      type: 'init',
+      meta_data: { 
+        context_data: filteredUserData
+      }
+    }
+    
+    this.websocket.send(JSON.stringify(initPacket));
+  }
+
   handleWebsocketMessage(wsData) {
+    if (!this.isAcknowledgementReceived && wsData.type != 'ack') {
+      console.log('Acknowledgement not received yet');
+      return;
+    }
+
     if (wsData.type == 'audio' || wsData.type == 'mark') {
       this.outputAudioQueue.enqueue(wsData);
     } else if (wsData.type == 'clear') {
       this.clearSpeakerPlayback();
+    } else if (wsData.type == 'ack') {
+      console.log('Acknowledgement received');
+      this.isAcknowledgementReceived = true;
     }
   }
 
@@ -109,26 +138,18 @@ class BolnaWebCalling {
       console.log('Call already in progress');
       return;
     }
-
-    let encodedData = '';
-    try {
-      this.contextData = replaceNewlinesInObject(this.contextData);
-      encodedData = encodeURIComponent(JSON.stringify(this.contextData));
-    } catch (error) {
-      console.error('Error encoding context data:', error);
-      return;
-    }
     
     this.isWebCallOngoing = true;
     this.onCallStateChange(true);
     
-    const url = `${this.websocketHost}/web-call/v1/${this.agentId}?auth_token=${this.accessToken}&user_agent=web-call&enforce_streaming=true&context_data=${encodedData}`;
+    const url = `${this.websocketHost}/web-call/v1/${this.agentId}?auth_token=${this.accessToken}&user_agent=web-call&enforce_streaming=true`;
     console.log(`Starting call ${url}`);
 
     const performWebsocketCloseEvents = (stream, processor) => {
       this.clearSpeakerPlayback();
       this.isWebCallOngoing = false;
       this.isFirstAudioPacketReceived = false;
+      this.isAcknowledgementReceived = false;
       
       if (processor) {
         processor.disconnect();
@@ -157,6 +178,7 @@ class BolnaWebCalling {
         ws.onopen = () => {
           console.log('WebSocket connected.');
           this.processQueueMessages();
+          this.sendInitPacket();
         };
         
         ws.onclose = () => {
@@ -196,7 +218,7 @@ class BolnaWebCalling {
           const int16Data = this.floatTo16BitPCM(inputData);
           const base64Data = this.arrayBufferToBase64(int16Data.buffer);
 
-          if (ws.readyState === WebSocket.OPEN) {
+          if (ws.readyState === WebSocket.OPEN && this.isAcknowledgementReceived) {
             ws.send(JSON.stringify({ type: 'audio', data: base64Data }));
           }
         };
@@ -218,6 +240,7 @@ class BolnaWebCalling {
     this.isWebCallOngoing = false;
     this.onCallStateChange(false);
     this.isFirstAudioPacketReceived = false;
+    this.isAcknowledgementReceived = false;
 
     if (this.websocket) {
       this.websocket.close();
@@ -265,18 +288,6 @@ class BolnaWebCalling {
       result[i] = s < 0 ? s * 32768 : s * 32767;
     }
     return result;
-  }
-  
-  replaceNewlinesInObject(obj) {
-    let newObj = {};
-    for (let key in obj) {
-        if (obj.hasOwnProperty(key) && typeof obj[key] === 'string') {
-            newObj[key] = obj[key].replace(/\n/g, "\\n");
-        } else {
-            newObj[key] = obj[key];
-        }
-    }
-    return newObj;
   }
 }
 
