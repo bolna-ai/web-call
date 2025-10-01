@@ -5,7 +5,9 @@ class BolnaWebCalling {
     this.accessToken = config.accessToken;
     this.websocketHost = config.websocketHost;
     this.contextData = config.contextData || {};
-    
+    this.interruptionThreshold = config.interruptionThreshold || 0.03;
+    this.enableMicInterruptions = config.enableMicInterruptions || false;
+
     // State variables
     this.isWebCallOngoing = false;
     this.isFirstAudioPacketReceived = false;
@@ -13,6 +15,9 @@ class BolnaWebCalling {
     this.outputAudioBufferSourceNode = null;
     this.isAcknowledgementReceived = false;
     this.audioOutputContext = new window.AudioContext();
+    this._micInterruptCounter = 0;
+    this._micInterruptFramesRequired = 2; // (2 frames of talking above threshold required for interruption)
+
     
     // Constants
     this.CHUNK = 4096;
@@ -217,7 +222,20 @@ class BolnaWebCalling {
           const inputData = inputBuffer.getChannelData(0);
           const int16Data = this.floatTo16BitPCM(inputData);
           const base64Data = this.arrayBufferToBase64(int16Data.buffer);
-
+          if (this.enableMicInterruptions) {
+            // Client-side mic interruptions.
+            const rms = Math.sqrt(inputData.reduce((sum, val) => sum + val * val, 0) / inputData.length);
+            if (rms > this.interruptionThreshold) {
+              this._micInterruptCounter++;
+              if (this._micInterruptCounter >= this._micInterruptFramesRequired && this.outputAudioBufferSourceNode) {
+                console.log('Mic interruption detected (sustained), stopping playback');
+                this.clearSpeakerPlayback();
+                this._micInterruptCounter = 0; // reset counter
+              }
+            } else {
+              this._micInterruptCounter = 0; // reset if below threshold
+            }
+          }
           if (ws.readyState === WebSocket.OPEN && this.isAcknowledgementReceived) {
             ws.send(JSON.stringify({ type: 'audio', data: base64Data }));
           }
