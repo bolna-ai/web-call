@@ -16,7 +16,7 @@ class BolnaWebCalling {
     this.isAcknowledgementReceived = false;
     this.audioOutputContext = new window.AudioContext();
     this._micInterruptCounter = 0;
-    this._micInterruptFramesRequired = 2; // (2 frames of talking above threshold required for interruption)
+    this._micInterruptFramesRequired = config.micInterruptFramesRequired || 4; // 4 = ~370ms 
 
     
     // Constants
