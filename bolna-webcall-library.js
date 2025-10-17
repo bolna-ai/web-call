@@ -5,6 +5,8 @@ class BolnaWebCalling {
     this.accessToken = config.accessToken;
     this.websocketHost = config.websocketHost;
     this.contextData = config.contextData || {};
+    this.audioChunkSize = config.audioChunkSize || 4096;
+    this.queueProcessingInterval = config.queueProcessingInterval || 100;
     
     // State variables
     this.isWebCallOngoing = false;
@@ -15,7 +17,7 @@ class BolnaWebCalling {
     this.audioOutputContext = new window.AudioContext();
     
     // Constants
-    this.CHUNK = 4096;
+    this.CHUNK = this.audioChunkSize;
     this.RATE = 16000;
     this.CHANNELS = 1;
     this.outputAudioQueue = new Queue();
@@ -86,7 +88,7 @@ class BolnaWebCalling {
         );
         break;
       }
-      await this.sleep(100);
+      await this.sleep(this.queueProcessingInterval);
     }
   }
 
