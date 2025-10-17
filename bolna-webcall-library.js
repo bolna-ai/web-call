@@ -24,6 +24,7 @@ class BolnaWebCalling {
     this.onCallStateChange = config.onCallStateChange || function() {};
     this.onFirstAudioPacket = config.onFirstAudioPacket || function() {};
     this.onError = config.onError || function() {};
+    this.onMediaPermissionGranted = config.onMediaPermissionGranted || function() {};
   }
 
   decodeAndPlayAudio(base64Packet) {
@@ -173,6 +174,7 @@ class BolnaWebCalling {
     navigator.mediaDevices
       .getUserMedia(constraints)
       .then((stream) => {
+        this.onMediaPermissionGranted();
         
         const ws = new WebSocket(url);
         ws.onopen = () => {
