@@ -166,7 +166,11 @@ export class BolnaWebCall extends Emitter<BolnaWebCallEvents> {
       return minted;
     } catch (err) {
       if (err instanceof WebCallError) throw err;
-      throw new WebCallError("mint_failed", "Could not reach the session endpoint", undefined, err);
+      // preserve the consumer's message (e.g. a getSession() that maps its backend's 429
+      // into user-facing text) instead of flattening every failure to one generic string
+      const message =
+        err instanceof Error && err.message ? err.message : "Could not reach the session endpoint";
+      throw new WebCallError("mint_failed", message, undefined, err);
     }
   }
 

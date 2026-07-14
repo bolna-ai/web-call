@@ -12794,7 +12794,8 @@ var BolnaWebCall = class extends Emitter {
       return minted;
     } catch (err) {
       if (err instanceof WebCallError) throw err;
-      throw new WebCallError("mint_failed", "Could not reach the session endpoint", void 0, err);
+      const message = err instanceof Error && err.message ? err.message : "Could not reach the session endpoint";
+      throw new WebCallError("mint_failed", message, void 0, err);
     }
   }
   // ------------------------------------------------------------------
