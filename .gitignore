@@ -3,5 +3,10 @@ node_modules/
 .DS_Store
 INIT.md
 
+# IDE / editor state — per-developer, never on GitHub
+.idea/
+.vscode/
+*.swp
+
 # NOTE: dist/ is intentionally NOT ignored — the CDN (jsDelivr) serves it straight from
 # a git tag (e.g. @v2.0.0/dist/bolna-web-call.min.js), so the built files must be committed.
