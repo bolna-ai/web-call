@@ -1,0 +1,43 @@
+{
+  "name": "@bolna/web-call",
+  "version": "2.0.0",
+  "description": "Bolna browser SDK for AI voice calls over WebRTC (SIP.js). Ephemeral per-call sessions — no API key in the browser.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bolna-ai/web-call.git"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "bolna",
+    "voice",
+    "webrtc",
+    "sip",
+    "ai",
+    "call"
+  ],
+  "dependencies": {
+    "sip.js": "^0.21.2"
+  },
+  "devDependencies": {
+    "tsup": "^8.0.0",
+    "typescript": "^5.4.0"
+  }
+}

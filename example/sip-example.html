@@ -1,0 +1,88 @@
+<!doctype html>
+<!-- Bolna Web-Call SDK v2 demo (SIP/WebRTC transport).
+     1) npm run build                                                   (produces dist/bolna-web-call.min.js)
+     2) BOLNA_API_KEY=bn-... BOLNA_AGENT_ID=... node example/server-example.js   (the safe mint proxy)
+     3) python3 -m http.server 8081   (from the web-call repo ROOT — the page loads ../dist/…)
+     4) open http://localhost:8081/example/sip-example.html -->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bolna Web-Call SDK v2 Demo</title>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; max-width: 600px; margin: 40px auto; padding: 0 16px; }
+    label { display: block; margin: 10px 0 4px; font-weight: 600; font-size: 13px; color: #444; }
+    input { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; }
+    .row { display: flex; gap: 10px; margin-top: 16px; }
+    button { flex: 1; padding: 10px; font-size: 15px; border-radius: 8px; border: 1px solid #ccc; cursor: pointer; background: #fff; }
+    button:disabled { opacity: 0.5; cursor: default; }
+    #call.active { background: #ef4444; border-color: #ef4444; color: #fff; }
+    #meter { height: 6px; background: #eee; border-radius: 3px; margin-top: 14px; overflow: hidden; }
+    #meter > div { height: 100%; width: 0; background: #22c55e; transition: width 80ms linear; }
+    #log { margin-top: 16px; font: 12px/1.5 ui-monospace, monospace; background: #f4f4f5; padding: 10px; border-radius: 8px; min-height: 140px; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h2>Bolna Web-Call SDK v2</h2>
+  <label for="sessionUrl">Session endpoint (your backend — never a bn- key here)</label>
+  <input id="sessionUrl" value="http://localhost:8787/session" />
+  <div class="row">
+    <button id="call">📞 Call</button>
+    <button id="mute" disabled>Mute</button>
+  </div>
+  <div id="meter"><div></div></div>
+  <div id="log">idle</div>
+
+  <script src="../dist/bolna-web-call.min.js"></script>
+  <script>
+    const logEl = document.getElementById('log');
+    const callBtn = document.getElementById('call');
+    const muteBtn = document.getElementById('mute');
+    const meterBar = document.querySelector('#meter > div');
+    const log = (...a) => { logEl.textContent += '\n' + a.join(' '); logEl.scrollTop = logEl.scrollHeight; };
+
+    let call = null;
+
+    callBtn.onclick = async () => {
+      if (call && call.getState() === 'active') { await call.stop(); return; }
+
+      if (typeof BolnaWebCall === 'undefined') {
+        log('ERROR: SDK bundle failed to load — run `npm run build` and serve from the repo root (see the comment at the top of this file)');
+        return;
+      }
+
+      call = new BolnaWebCall({
+        sessionUrl: document.getElementById('sessionUrl').value.trim(),
+        debug: false,
+      });
+      call.on('state-change', (s) => log('state:', s));
+      call.on('media-permission', () => log('mic permission granted'));
+      call.on('call-start', () => {
+        log('>>> connected — talk to the agent (run_id ' + call.getRunId() + ')');
+        callBtn.textContent = 'Hang up';
+        callBtn.classList.add('active');
+        muteBtn.disabled = false;
+      });
+      call.on('call-end', ({ reason }) => {
+        log('call ended:', reason);
+        callBtn.textContent = '📞 Call';
+        callBtn.classList.remove('active');
+        muteBtn.disabled = true;
+        muteBtn.textContent = 'Mute';
+        meterBar.style.width = '0';
+      });
+      call.on('error', (e) => log('ERROR', e.code + ':', e.message, e.scope ? '(' + e.scope + ')' : ''));
+      call.on('volume-level', (v) => { meterBar.style.width = Math.round(v * 100) + '%'; });
+
+      callBtn.disabled = true;
+      try { await call.start(); } catch {} finally { callBtn.disabled = false; }
+    };
+
+    muteBtn.onclick = () => {
+      call.setMuted(!call.isMuted());
+      muteBtn.textContent = call.isMuted() ? 'Unmute' : 'Mute';
+      log(call.isMuted() ? 'muted' : 'unmuted');
+    };
+  </script>
+</body>
+</html>
