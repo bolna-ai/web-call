@@ -12877,6 +12877,13 @@ var BolnaWebCall = class extends Emitter {
       authorizationPassword: session.sip_password,
       logLevel: this.options.debug ? "debug" : "error",
       sessionDescriptionHandlerFactoryOptions: {
+        // SIP-over-WSS to FreeSWITCH is non-trickle: the INVITE can't go out until ICE gathering
+        // finishes. The mint hands out many TURN relays (env host ×3 transports + every live
+        // node), and the slow tcp/tls relay allocations drag gathering to SIP.js's ~5s default —
+        // that's the whole connect delay. Cap it: the fast host/srflx/UDP-relay candidates gather
+        // well within 2s (calls use the UDP relay), so the INVITE goes out promptly and only the
+        // slow relay candidates we don't need (when UDP works) get dropped.
+        iceGatheringTimeout: 2e3,
         peerConnectionConfiguration: {
           // ICE servers come only from the mint: per-call HMAC TURN credentials
           iceServers: session.ice_servers,
