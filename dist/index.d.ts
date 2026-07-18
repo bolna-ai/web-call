@@ -82,6 +82,7 @@ declare class BolnaWebCall extends Emitter<BolnaWebCallEvents> {
     private onIceState;
     private endedByUs;
     private muted;
+    private startToken;
     constructor(options: BolnaWebCallOptions);
     getState(): CallState;
     getRunId(): string | null;
