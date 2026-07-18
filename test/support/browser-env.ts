@@ -36,9 +36,9 @@ export function setBrowserControl(next: BrowserControl): void {
 
 export function freshSession(overrides: Partial<Session> = {}): Session {
   return {
-    run_id: "run_" + Math.random().toString(36).slice(2),
+    run_id: "run_" + globalThis.crypto.getRandomValues(new Uint32Array(1))[0].toString(36),
     agent_id: "agent_1",
-    sip_username: "u_" + Math.random().toString(36).slice(2),
+    sip_username: "u_" + globalThis.crypto.getRandomValues(new Uint32Array(1))[0].toString(36),
     sip_password: "p",
     sip_domain: "sip.example.com",
     wss_url: "wss://sip.example.com/ws",
