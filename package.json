@@ -23,7 +23,9 @@
   "sideEffects": false,
   "scripts": {
     "build": "tsup",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:e2e": "playwright test"
   },
   "keywords": [
     "bolna",
@@ -37,7 +39,9 @@
     "sip.js": "^0.21.2"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "tsup": "^8.0.0",
-    "typescript": "^5.4.0"
+    "typescript": "^5.4.0",
+    "vitest": "^2.1.9"
   }
 }
