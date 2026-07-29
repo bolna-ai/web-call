@@ -86,8 +86,9 @@ export class BolnaWebCall extends Emitter<BolnaWebCallEvents> {
   }
 
   /** Start a call: mint session → mic permission → connect → resolves once the agent answers.
-   *  Call from a user gesture (click) so audio playback is allowed. */
-  async start(): Promise<void> {
+   *  Call from a user gesture (click) so audio playback is allowed.
+   *  `options.userData` overrides the constructor's userData for this call. */
+  async start(options?: { userData?: Record<string, unknown> }): Promise<void> {
     if (this.state !== "idle" && this.state !== "ended") {
       // one attempt at a time: rapid re-clicks would each mint a fresh run_id holding a
       // concurrency slot, and the connect burst can trip the edge's anti-flood ban
@@ -98,7 +99,7 @@ export class BolnaWebCall extends Emitter<BolnaWebCallEvents> {
     this.setState("connecting");
 
     try {
-      const session = await this.fetchSession();
+      const session = await this.fetchSession(options?.userData ?? this.options.userData);
       this.runId = session.run_id;
 
       // acquire the mic BEFORE signaling: permission-denied fails fast and no slot-holding
@@ -130,7 +131,7 @@ export class BolnaWebCall extends Emitter<BolnaWebCallEvents> {
   // session minting
   // ------------------------------------------------------------------
 
-  private async fetchSession(): Promise<Session> {
+  private async fetchSession(userData?: Record<string, unknown>): Promise<Session> {
     const { session, getSession, sessionUrl } = this.options;
     try {
       if (!session && !getSession && !sessionUrl) {
@@ -147,7 +148,13 @@ export class BolnaWebCall extends Emitter<BolnaWebCallEvents> {
         return session;
       }
       if (getSession) return await getSession();
-      const response = await fetch(sessionUrl!, { method: "POST" });
+      const response = await fetch(sessionUrl!, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        // user_data rides to your proxy, which forwards it to /web-call/freeswitch-session —
+        // Bolna substitutes it into the agent prompt + welcome message (telephony parity)
+        body: JSON.stringify(userData ? { user_data: userData } : {}),
+      });
       if (!response.ok) {
         const body = await response.json().catch(() => ({}) as Record<string, unknown>);
         if (response.status === 429) {

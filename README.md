@@ -77,6 +77,7 @@ Optional:
 
 | Option | Default | Purpose |
 |---|---|---|
+| `userData` | — | Dynamic variables for the call — substituted into the agent's prompt + welcome message (same as telephony `/call`'s `user_data`). Sent as `{"user_data": ...}` in the POST body to `sessionUrl`; forward it yourself if you use `getSession`/`session` |
 | `audio` | AEC/NS/AGC on | `MediaTrackConstraints` for the mic |
 | `iceTransportPolicy` | `"all"` | `"relay"` forces TURN (restrictive networks/testing) |
 | `audioElement` | hidden element | Play the agent through your own `<audio>` |
@@ -86,7 +87,7 @@ Optional:
 
 | Method | Description |
 |---|---|
-| `await call.start()` | Mint → mic permission → connect. Resolves when the agent answers. **Call from a user gesture** so audio is allowed to play. |
+| `await call.start(opts?)` | Mint → mic permission → connect. Resolves when the agent answers. **Call from a user gesture** so audio is allowed to play. `opts.userData` overrides the constructor's `userData` for this call. |
 | `await call.stop()` | Hang up + release everything. Idempotent. |
 | `call.setMuted(bool)` / `call.isMuted()` | Toggle the mic without ending the call |
 | `call.getState()` | `"idle" \| "connecting" \| "ringing" \| "active" \| "ended"` |

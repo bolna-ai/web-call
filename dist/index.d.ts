@@ -47,6 +47,11 @@ interface BolnaWebCallOptions {
     getSession?: () => Promise<Session>;
     /** A pre-fetched session. Single-use and short-lived — prefer sessionUrl/getSession. */
     session?: Session;
+    /** Dynamic variables for this call — substituted into the agent's prompt and welcome
+     *  message, same as the telephony /call API's user_data. Sent as {"user_data": ...} in the
+     *  POST body to sessionUrl; if you use getSession or a pre-fetched session, forward it to
+     *  Bolna's /web-call/freeswitch-session yourself. Can be overridden per call via start(). */
+    userData?: Record<string, unknown>;
     /** Mic constraints. Defaults keep echoCancellation/noiseSuppression/autoGainControl on. */
     audio?: MediaTrackConstraints;
     /** "relay" forces TURN (testing/restrictive networks). Default "all". */
@@ -89,8 +94,11 @@ declare class BolnaWebCall extends Emitter<BolnaWebCallEvents> {
     /** Mute/unmute the microphone (local track toggle — the call stays up). */
     setMuted(muted: boolean): void;
     /** Start a call: mint session → mic permission → connect → resolves once the agent answers.
-     *  Call from a user gesture (click) so audio playback is allowed. */
-    start(): Promise<void>;
+     *  Call from a user gesture (click) so audio playback is allowed.
+     *  `options.userData` overrides the constructor's userData for this call. */
+    start(options?: {
+        userData?: Record<string, unknown>;
+    }): Promise<void>;
     /** Hang up and release everything. Safe to call in any state (idempotent). */
     stop(): Promise<void>;
     private fetchSession;
