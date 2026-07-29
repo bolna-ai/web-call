@@ -12702,6 +12702,10 @@ var BolnaWebCall = class extends Emitter {
     this.onIceState = null;
     this.endedByUs = false;
     this.muted = false;
+    // identifies the in-flight start() attempt; stop() clears it so a pending fetchSession()/
+    // preflightMicrophone()/connect() that resumes later knows it was cancelled and must not
+    // resurrect a call the caller already tried to end
+    this.startToken = null;
     const sources = [options.sessionUrl, options.getSession, options.session].filter(Boolean);
     if (sources.length !== 1) {
       throw new Error("BolnaWebCall: provide exactly one of sessionUrl, getSession, or session");
@@ -12733,19 +12737,28 @@ var BolnaWebCall = class extends Emitter {
     if (this.state !== "idle" && this.state !== "ended") {
       throw this.fail("already_active", "A call is already in progress");
     }
+    const token = this.startToken = /* @__PURE__ */ Symbol("start");
     this.endedByUs = false;
     this.muted = false;
     this.setState("connecting");
     try {
       const session = await this.fetchSession(options?.userData ?? this.options.userData);
+      if (token !== this.startToken) return;
       this.runId = session.run_id;
       const audioConstraints = { ...DEFAULT_AUDIO, ...this.options.audio ?? {} };
       await this.preflightMicrophone(audioConstraints);
+      if (token !== this.startToken) return;
       this.emit("media-permission");
       await this.connect(session, audioConstraints);
+      if (token !== this.startToken) {
+        await this.sendHangup();
+        this.teardown("local-hangup", false);
+        return;
+      }
       this.setState("active");
       this.emit("call-start");
     } catch (err) {
+      if (token !== this.startToken) return;
       const callError = this.toCallError(err);
       this.emit("error", callError);
       this.teardown("failed", false);
@@ -12755,6 +12768,7 @@ var BolnaWebCall = class extends Emitter {
   /** Hang up and release everything. Safe to call in any state (idempotent). */
   async stop() {
     if (this.state === "idle" || this.state === "ended") return;
+    this.startToken = null;
     this.endedByUs = true;
     await this.sendHangup();
     this.teardown("local-hangup");

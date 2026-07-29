@@ -53,6 +53,10 @@ export class BolnaWebCall extends Emitter<BolnaWebCallEvents> {
   private onIceState: (() => void) | null = null;
   private endedByUs = false;
   private muted = false;
+  // identifies the in-flight start() attempt; stop() clears it so a pending fetchSession()/
+  // preflightMicrophone()/connect() that resumes later knows it was cancelled and must not
+  // resurrect a call the caller already tried to end
+  private startToken: symbol | null = null;
 
   constructor(options: BolnaWebCallOptions) {
     super();
@@ -94,24 +98,39 @@ export class BolnaWebCall extends Emitter<BolnaWebCallEvents> {
       // concurrency slot, and the connect burst can trip the edge's anti-flood ban
       throw this.fail("already_active", "A call is already in progress");
     }
+    const token = (this.startToken = Symbol("start"));
     this.endedByUs = false;
     this.muted = false;
     this.setState("connecting");
 
     try {
       const session = await this.fetchSession(options?.userData ?? this.options.userData);
+      // stop() was called while the session was minting — abandon before dialing anything
+      if (token !== this.startToken) return;
       this.runId = session.run_id;
 
       // acquire the mic BEFORE signaling: permission-denied fails fast and no slot-holding
       // SIP dialog is created for a call that can never have audio
       const audioConstraints = { ...DEFAULT_AUDIO, ...(this.options.audio ?? {}) };
       await this.preflightMicrophone(audioConstraints);
+      // stop() was called during the mic-permission prompt — abandon before dialing
+      if (token !== this.startToken) return;
       this.emit("media-permission");
 
       await this.connect(session, audioConstraints);
+      if (token !== this.startToken) {
+        // stop() was called mid-connect: a real SIP dialog now exists (stop()'s own
+        // sendHangup ran too early to see it) — hang it up instead of going "active"
+        await this.sendHangup();
+        this.teardown("local-hangup", false);
+        return;
+      }
       this.setState("active");
       this.emit("call-start");
     } catch (err) {
+      // a cancelled attempt failing on its way out (e.g. connect() throwing after stop()
+      // already tore everything down) isn't a user-facing error — stop() already handled it
+      if (token !== this.startToken) return;
       const callError = this.toCallError(err);
       this.emit("error", callError);
       this.teardown("failed", false);
@@ -122,6 +141,7 @@ export class BolnaWebCall extends Emitter<BolnaWebCallEvents> {
   /** Hang up and release everything. Safe to call in any state (idempotent). */
   async stop(): Promise<void> {
     if (this.state === "idle" || this.state === "ended") return;
+    this.startToken = null; // invalidate any in-flight start() so it can't resurrect the call
     this.endedByUs = true;
     await this.sendHangup();
     this.teardown("local-hangup");
