@@ -12731,8 +12731,9 @@ var BolnaWebCall = class extends Emitter {
     }
   }
   /** Start a call: mint session → mic permission → connect → resolves once the agent answers.
-   *  Call from a user gesture (click) so audio playback is allowed. */
-  async start() {
+   *  Call from a user gesture (click) so audio playback is allowed.
+   *  `options.userData` overrides the constructor's userData for this call. */
+  async start(options) {
     if (this.state !== "idle" && this.state !== "ended") {
       throw this.fail("already_active", "A call is already in progress");
     }
@@ -12741,7 +12742,7 @@ var BolnaWebCall = class extends Emitter {
     this.muted = false;
     this.setState("connecting");
     try {
-      const session = await this.fetchSession();
+      const session = await this.fetchSession(options?.userData ?? this.options.userData);
       if (token !== this.startToken) return;
       this.runId = session.run_id;
       const audioConstraints = { ...DEFAULT_AUDIO, ...this.options.audio ?? {} };
@@ -12775,7 +12776,7 @@ var BolnaWebCall = class extends Emitter {
   // ------------------------------------------------------------------
   // session minting
   // ------------------------------------------------------------------
-  async fetchSession() {
+  async fetchSession(userData) {
     const { session, getSession, sessionUrl } = this.options;
     try {
       if (!session && !getSession && !sessionUrl) {
@@ -12789,7 +12790,13 @@ var BolnaWebCall = class extends Emitter {
         return session;
       }
       if (getSession) return await getSession();
-      const response = await fetch(sessionUrl, { method: "POST" });
+      const response = await fetch(sessionUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        // user_data rides to your proxy, which forwards it to /web-call/freeswitch-session —
+        // Bolna substitutes it into the agent prompt + welcome message (telephony parity)
+        body: JSON.stringify(userData ? { user_data: userData } : {})
+      });
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
         if (response.status === 429) {

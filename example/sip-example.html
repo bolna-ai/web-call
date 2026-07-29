@@ -75,7 +75,7 @@
       call.on('volume-level', (v) => { meterBar.style.width = Math.round(v * 100) + '%'; });
 
       callBtn.disabled = true;
-      try { await call.start(); } catch {} finally { callBtn.disabled = false; }
+      try { await call.start({ userData: (() => { try { return JSON.parse($('userData').value || 'null') || undefined; } catch { return undefined; } })() }); } catch {} finally { callBtn.disabled = false; }
     };
 
     muteBtn.onclick = () => {

@@ -24,10 +24,21 @@ http
     if (req.method !== "POST" || req.url !== "/session") return res.writeHead(404).end();
 
     try {
+      // forward the page's dynamic variables (SDK sends {"user_data": {...}}) — Bolna
+      // substitutes them into the agent prompt + welcome message, like telephony's /call
+      let userData;
+      try {
+        const chunks = [];
+        for await (const chunk of req) chunks.push(chunk);
+        const parsed = JSON.parse(Buffer.concat(chunks).toString() || "{}");
+        userData = parsed.user_data;
+      } catch {
+        userData = undefined;
+      }
       const upstream = await fetch(`${API_BASE}/web-call/freeswitch-session`, {
         method: "POST",
         headers: { Authorization: `Bearer ${API_KEY}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ agent_id: AGENT_ID }),
+        body: JSON.stringify(userData ? { agent_id: AGENT_ID, user_data: userData } : { agent_id: AGENT_ID }),
       });
       const body = await upstream.text();
       res.writeHead(upstream.status, { "Content-Type": "application/json" }).end(body);
