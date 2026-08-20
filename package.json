@@ -1,6 +1,6 @@
 {
   "name": "@bolna/web-call",
-  "version": "2.0.0",
+  "version": "3.0.1",
   "description": "Bolna browser SDK for AI voice calls over WebRTC (SIP.js). Ephemeral per-call sessions — no API key in the browser.",
   "license": "MIT",
   "repository": {
@@ -21,7 +21,11 @@
     "dist"
   ],
   "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
+    "prepublishOnly": "npm run typecheck && npm test && npm run build",
     "build": "tsup",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
