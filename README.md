@@ -1,5 +1,7 @@
 # Bolna Web-Call SDK
 
+[![npm](https://img.shields.io/npm/v/@bolna/web-call)](https://www.npmjs.com/package/@bolna/web-call)
+
 Add live AI voice calls to any web app. The SDK connects the browser to your Bolna agent
 over **WebRTC** (Opus audio, echo cancellation, TURN fallback) — one class, a few events.
 
@@ -25,7 +27,7 @@ import { BolnaWebCall } from "@bolna/web-call";
 **CDN / plain `<script>`**
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/bolna-ai/web-call@v2.0.0/dist/bolna-web-call.min.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/bolna-ai/web-call@v3.0.1/dist/bolna-web-call.min.js"></script>
 <script>
   const call = new BolnaWebCall({ sessionUrl: "/api/bolna-session" });
 </script>
@@ -129,16 +131,22 @@ Optional:
 ## Legacy library (v1)
 
 `bolna-webcall-library.js` (the v1.0.x direct-WebSocket library) remains in this repo unchanged
-— existing jsDelivr pins keep working. New integrations should use the v2 SDK above: better
+— existing jsDelivr pins keep working. New integrations should use the v3 SDK above: better
 audio (Opus + jitter buffer vs raw 16k PCM), standard WebRTC, and no key-handling foot-guns.
 
 ## Development
 
 ```bash
 npm install
-npm run build      # dist/index.mjs (+ d.ts) and dist/bolna-web-call.min.js
+npm run build      # dist/index.js (+ d.ts) and dist/bolna-web-call.min.js
 npm run typecheck
+npm test           # unit tests (vitest)
+npm run test:e2e   # browser tests (playwright)
 ```
 
 Demo: `BOLNA_API_KEY=bn-... BOLNA_AGENT_ID=... node example/server-example.js`, serve the repo
 (`python3 -m http.server 8081`), open `http://localhost:8081/example/sip-example.html`.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
