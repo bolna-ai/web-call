@@ -481,12 +481,12 @@ function peg$padEnd(str, targetLength, padString) {
   return str + padString.slice(0, targetLength);
 }
 var SyntaxError = class _SyntaxError extends Error {
-  constructor(message, expected, found, location) {
+  constructor(message, expected, found, location2) {
     super();
     this.message = message;
     this.expected = expected;
     this.found = found;
-    this.location = location;
+    this.location = location2;
     this.name = "SyntaxError";
     if (typeof Object.setPrototypeOf === "function") {
       Object.setPrototypeOf(this, _SyntaxError.prototype);
@@ -986,7 +986,7 @@ function peg$parse(input, options) {
       }
       options.data.multi_header.push({
         "position": peg$currPos,
-        "offset": location().start.offset,
+        "offset": location2().start.offset,
         "parsed": header
       });
     },
@@ -1207,7 +1207,7 @@ function peg$parse(input, options) {
       }
       options.data.multi_header.push({
         "position": peg$currPos,
-        "offset": location().start.offset,
+        "offset": location2().start.offset,
         "parsed": header
       });
     },
@@ -1682,7 +1682,7 @@ function peg$parse(input, options) {
   function text() {
     return input.substring(peg$savedPos, peg$currPos);
   }
-  function location() {
+  function location2() {
     return peg$computeLocation(peg$savedPos, peg$currPos);
   }
   function expected(description, location1) {
@@ -2094,11 +2094,11 @@ var REASON_PHRASE = {
   604: "Does Not Exist Anywhere",
   606: "Not Acceptable"
 };
-function createRandomToken(size, base = 32) {
+function createRandomToken(size, base2 = 32) {
   let token = "";
   for (let i = 0; i < size; i++) {
-    const r = Math.floor(Math.random() * base);
-    token += r.toString(base);
+    const r = Math.floor(Math.random() * base2);
+    token += r.toString(base2);
   }
   return token;
 }
@@ -12629,6 +12629,164 @@ var UserAgent = class _UserAgent {
   }
 };
 
+// src/browser.ts
+var POLL_MS = 1500;
+var MAX_BACKOFF_MS = 15e3;
+var REQUEST_TIMEOUT_MS = 1e4;
+var FINISH_GRACE_MS = 15e3;
+var FINISHED = /* @__PURE__ */ new Set(["done", "failed", "stopped"]);
+var ViewExpired = class extends Error {
+};
+function hasVisibilityApi() {
+  return typeof document !== "undefined" && typeof document.addEventListener === "function" && "hidden" in document;
+}
+var BrowserWatcher = class {
+  constructor(access, onUpdate, onError) {
+    this.access = access;
+    this.onUpdate = onUpdate;
+    this.onError = onError;
+    this.timer = null;
+    this.delayMs = POLL_MS;
+    this.running = false;
+    this.polling = false;
+    this.failing = false;
+    this.recheckScreenshot = false;
+    this.finishBy = null;
+    this.inFlight = null;
+    this.latest = null;
+    this.screenshotUrl = null;
+    this.onVisibilityChange = () => {
+      if (document.hidden) this.clearTimer();
+      else if (!this.polling) this.schedule(0);
+    };
+  }
+  /** The latest view, or null before the browser has shown anything. */
+  get view() {
+    return this.latest;
+  }
+  start() {
+    if (this.running) return;
+    this.running = true;
+    if (hasVisibilityApi()) document.addEventListener("visibilitychange", this.onVisibilityChange);
+    this.schedule(0);
+  }
+  /** The call ended: keep looking until the browser's outcome shows, for FINISH_GRACE_MS at most. */
+  finish() {
+    if (!this.running) return;
+    if (this.latest && FINISHED.has(this.latest.status)) this.stop();
+    else this.finishBy = Date.now() + FINISH_GRACE_MS;
+  }
+  /** Stop asking. The last view, its screenshot included, stays usable until release(). */
+  stop() {
+    this.running = false;
+    this.clearTimer();
+    this.inFlight?.abort();
+    if (hasVisibilityApi()) document.removeEventListener("visibilitychange", this.onVisibilityChange);
+  }
+  /** Stop, and free the last screenshot: nothing shows this view any more. */
+  release() {
+    this.stop();
+    if (this.screenshotUrl) {
+      URL.revokeObjectURL(this.screenshotUrl);
+      this.screenshotUrl = null;
+    }
+  }
+  schedule(delayMs) {
+    this.clearTimer();
+    if (!this.running || hasVisibilityApi() && document.hidden) return;
+    this.timer = setTimeout(() => void this.poll(), delayMs);
+  }
+  clearTimer() {
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+  }
+  async poll() {
+    this.timer = null;
+    this.polling = true;
+    try {
+      const view = await this.fetchView();
+      if (!this.running) return;
+      this.delayMs = POLL_MS;
+      this.failing = false;
+      if (view) {
+        this.latest = view;
+        this.onUpdate(view);
+      }
+    } catch (err) {
+      if (!this.running) return;
+      if (err instanceof ViewExpired) {
+        this.stop();
+        this.onError({ code: "view_expired", message: "The browser view for this call is no longer available" });
+        return;
+      }
+      this.delayMs = Math.min(this.delayMs * 2, MAX_BACKOFF_MS);
+      if (!this.failing) {
+        this.failing = true;
+        const reason = err instanceof Error ? err.message : String(err);
+        this.onError({ code: "view_unavailable", message: `Couldn't load the browser view: ${reason}` });
+      }
+    } finally {
+      this.polling = false;
+    }
+    const finished = this.latest !== null && FINISHED.has(this.latest.status);
+    if (this.finishBy !== null && (finished || Date.now() >= this.finishBy)) {
+      this.stop();
+      return;
+    }
+    this.schedule(this.delayMs);
+  }
+  url(path) {
+    return `${this.access.api_base_url.replace(/\/+$/, "")}/browser-agent/${path}`;
+  }
+  async request(path) {
+    const controller = new AbortController();
+    this.inFlight = controller;
+    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    try {
+      return await fetch(this.url(path), {
+        headers: { Authorization: `Bearer ${this.access.token}` },
+        cache: "no-store",
+        signal: controller.signal
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+  /** The new view, or null when nothing changed since the last one. */
+  async fetchView() {
+    const since = this.latest ? `?since=${encodeURIComponent(this.latest.version)}` : "";
+    const response = await this.request(`view${since}`);
+    if (response.status === 204) {
+      if (!this.latest || !this.recheckScreenshot) return null;
+      this.recheckScreenshot = false;
+      const screenshotUrl = await this.fetchScreenshot();
+      return screenshotUrl === this.latest.screenshot_url ? null : { ...this.latest, screenshot_url: screenshotUrl };
+    }
+    if (response.status === 404) throw new ViewExpired();
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const fields = await response.json();
+    this.recheckScreenshot = true;
+    return { ...fields, screenshot_url: await this.fetchScreenshot() };
+  }
+  /** The latest screenshot as an object URL. A failed fetch keeps the previous one: the next view retries. */
+  async fetchScreenshot() {
+    try {
+      const response = await this.request("view/screenshot");
+      if (response.status !== 200) return this.screenshotUrl;
+      const image = await response.blob();
+      if (!this.running) return this.screenshotUrl;
+      const url = URL.createObjectURL(image);
+      if (this.screenshotUrl) URL.revokeObjectURL(this.screenshotUrl);
+      this.screenshotUrl = url;
+      return url;
+    } catch {
+      return this.screenshotUrl;
+    }
+  }
+};
+
 // src/events.ts
 var Emitter = class {
   constructor() {
@@ -12663,6 +12821,639 @@ var Emitter = class {
     this.listeners.clear();
   }
 };
+
+// src/page.ts
+var POLL_MS2 = 1e3;
+var MAX_BACKOFF_MS2 = 1e4;
+var REQUEST_TIMEOUT_MS2 = 1e4;
+var VALUES_DEBOUNCE_MS = 400;
+var RESCAN_DEBOUNCE_MS = 300;
+var DEFAULT_TYPING_DELAY_MS = 18;
+var MAX_TYPING_MS = 1200;
+var HIGHLIGHT_MS = 900;
+var REPORT_WAIT_MS = 15e3;
+var MAX_FIELDS = 30;
+var NAME_MAX_CHARS = 40;
+var LABEL_MAX_CHARS = 120;
+var NO_REPORT = "The page didn't say whether the form went through.";
+var REFERENCE_MAX_CHARS = 64;
+var REASON_MAX_CHARS = 120;
+var SENSITIVE_NAME = /(pass(word|code)|card|cvv|cvc|otp|one.?time|\bpin\b|ssn|iban|account.?num|routing|security.?code)/i;
+var SENSITIVE_AUTOCOMPLETE = /^(cc-|current-password|new-password|one-time-code)/;
+var NEVER_INPUT_TYPES = /* @__PURE__ */ new Set(["password", "hidden", "file", "submit", "button", "reset", "image"]);
+var OPTION_BUTTONS = 'button, [role="button"], [role="radio"], [data-bolna-option]';
+var FINISHED2 = /* @__PURE__ */ new Set(["done", "failed", "stopped"]);
+var PageNotAttached = class extends Error {
+};
+function squash(text) {
+  return (text ?? "").replace(/\s+/g, " ").trim();
+}
+function cleanLabel(text) {
+  return squash(text).replace(/\s*\*+$/, "");
+}
+function same(a, b) {
+  return squash(a).toLowerCase() === squash(b).toLowerCase();
+}
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+function ownText(element2) {
+  let text = "";
+  const walk = (node) => {
+    for (const child of Array.from(node.childNodes)) {
+      if (child.nodeType === 3) text += child.textContent ?? "";
+      else if (child instanceof Element && !child.matches("input, select, textarea, button, option")) walk(child);
+    }
+  };
+  walk(element2);
+  return squash(text);
+}
+function labelledBy(element2) {
+  const ids = element2.getAttribute("aria-labelledby");
+  if (!ids) return "";
+  return squash(ids.split(/\s+/).map((id) => element2.ownerDocument.getElementById(id)?.textContent ?? "").join(" "));
+}
+function labelOf(control) {
+  const named = control.getAttribute("data-bolna-label") || control.getAttribute("aria-label") || labelledBy(control);
+  if (named) return cleanLabel(named);
+  if (control.id) {
+    const label = Array.from(control.ownerDocument.getElementsByTagName("label")).find((l) => l.htmlFor === control.id);
+    if (label && ownText(label)) return cleanLabel(ownText(label));
+  }
+  const wrapping = control.closest("label");
+  if (wrapping && ownText(wrapping)) return cleanLabel(ownText(wrapping));
+  return cleanLabel(control.getAttribute("placeholder") || control.getAttribute("name") || control.id);
+}
+function groupLabel(group, fallback) {
+  if (group) {
+    const named = group.getAttribute("data-bolna-label") || group.getAttribute("aria-label") || labelledBy(group);
+    if (named) return cleanLabel(named);
+  }
+  const legend = group?.closest("fieldset")?.querySelector("legend");
+  return cleanLabel(legend?.textContent) || fallback;
+}
+function isSensitive(control) {
+  const autocomplete = (control.getAttribute("autocomplete") || "").toLowerCase();
+  const names = `${control.getAttribute("name") ?? ""} ${control.id}`;
+  return SENSITIVE_AUTOCOMPLETE.test(autocomplete) || SENSITIVE_NAME.test(names);
+}
+function isLeftOut(element2) {
+  return Boolean(element2.closest('[data-bolna-ignore], [hidden], [aria-hidden="true"], [inert]'));
+}
+function setNativeValue(control, value) {
+  const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(control), "value")?.set;
+  if (setter) setter.call(control, value);
+  else control.value = value;
+}
+function highlight(element2) {
+  const previous = element2.style.outline;
+  element2.style.outline = "2px solid #22c55e";
+  return () => {
+    setTimeout(() => element2.style.outline = previous, HIGHLIGHT_MS);
+  };
+}
+function textField(control) {
+  return {
+    read: () => control.value,
+    async apply(value, typingDelayMs, isActive) {
+      if (control.value === value) return;
+      const done = highlight(control);
+      control.focus?.();
+      const steps = typingDelayMs > 0 ? Math.max(1, Math.min(value.length, Math.floor(MAX_TYPING_MS / typingDelayMs))) : 1;
+      for (let step = 1; step <= steps; step++) {
+        setNativeValue(control, value.slice(0, Math.ceil(value.length * step / steps)));
+        control.dispatchEvent(new Event("input", { bubbles: true }));
+        if (step < steps) {
+          await sleep(typingDelayMs);
+          if (!isActive()) break;
+        }
+      }
+      control.dispatchEvent(new Event("change", { bubbles: true }));
+      control.blur?.();
+      done();
+    }
+  };
+}
+function selectField(control) {
+  const chosen = () => Array.from(control.options).find((option) => option.selected && option.value !== "");
+  return {
+    read: () => squash(chosen()?.text),
+    async apply(value) {
+      const option = Array.from(control.options).find((o) => same(o.text, value) || same(o.value, value));
+      if (!option || option.selected) return;
+      const done = highlight(control);
+      setNativeValue(control, option.value);
+      control.dispatchEvent(new Event("input", { bubbles: true }));
+      control.dispatchEvent(new Event("change", { bubbles: true }));
+      done();
+    }
+  };
+}
+function clickField(choices) {
+  return {
+    read: () => choices.find((choice) => choice.picked())?.label ?? "",
+    async apply(value) {
+      const choice = choices.find((c) => same(c.label, value));
+      if (!choice || choice.picked()) return;
+      const done = highlight(choice.element);
+      choice.element.click();
+      done();
+    }
+  };
+}
+function checkboxField(control) {
+  return {
+    read: () => control.checked ? "yes" : "no",
+    async apply(value) {
+      if (value === "yes" === control.checked) return;
+      const done = highlight(control);
+      control.click();
+      done();
+    }
+  };
+}
+function pressed(button) {
+  return ["aria-pressed", "aria-checked", "aria-selected", "data-bolna-selected"].some(
+    (name) => button.getAttribute(name) === "true"
+  );
+}
+function scanForm(form) {
+  const fields = [];
+  const names = /* @__PURE__ */ new Set();
+  const radioGroups = /* @__PURE__ */ new Set();
+  const add = (base2, field) => {
+    if (fields.length >= MAX_FIELDS) return;
+    let name = fieldName(base2);
+    for (let n = 2; names.has(name); n++) name = `${fieldName(base2).slice(0, NAME_MAX_CHARS - 3)}_${n}`;
+    names.add(name);
+    fields.push({ ...field, info: { ...field.info, name, label: field.info.label.slice(0, LABEL_MAX_CHARS) } });
+  };
+  for (const element2 of Array.from(form.querySelectorAll("input, select, textarea, [data-bolna-field]"))) {
+    if (isLeftOut(element2) || isSensitive(element2)) continue;
+    const declared = element2.getAttribute("data-bolna-field") ?? "";
+    const required = element2.required || element2.getAttribute("aria-required") === "true";
+    if (element2 instanceof HTMLTextAreaElement) {
+      if (element2.disabled) continue;
+      const label = labelOf(element2);
+      add(declared || element2.name || label, { ...textField(element2), info: base(label, "long_text", required) });
+    } else if (element2 instanceof HTMLSelectElement) {
+      if (element2.disabled) continue;
+      const options = Array.from(element2.options).filter((o) => o.value !== "").map((o) => squash(o.text));
+      if (!options.length) continue;
+      const label = labelOf(element2);
+      add(declared || element2.name || label, { ...selectField(element2), info: { ...base(label, "choice", required), options } });
+    } else if (element2 instanceof HTMLInputElement) {
+      const type = (element2.type || "text").toLowerCase();
+      if (element2.disabled || NEVER_INPUT_TYPES.has(type)) continue;
+      if (type === "radio") {
+        const group = element2.name || element2.id;
+        if (radioGroups.has(group)) continue;
+        radioGroups.add(group);
+        const radios = Array.from(form.querySelectorAll('input[type="radio"]')).filter(
+          (radio) => (radio.name || radio.id) === group && !radio.disabled && !isLeftOut(radio)
+        );
+        const choices = radios.map((radio) => ({
+          label: labelOf(radio) || radio.value,
+          element: radio,
+          picked: () => radio.checked
+        }));
+        const label = groupLabel(element2.closest('[role="radiogroup"], fieldset'), element2.name);
+        const anyRequired = radios.some((radio) => radio.required);
+        add(declared || element2.name || label, {
+          ...clickField(choices),
+          info: { ...base(label, "choice", anyRequired), options: choices.map((c) => c.label) }
+        });
+      } else if (type === "checkbox") {
+        const label = labelOf(element2);
+        add(declared || element2.name || label, { ...checkboxField(element2), info: base(label, "checkbox", required) });
+      } else {
+        const label = labelOf(element2);
+        add(declared || element2.name || label, {
+          ...textField(element2),
+          info: { ...base(label, "text", required), input_type: type === "text" ? "" : type }
+        });
+      }
+    } else if (declared) {
+      const buttons = Array.from(element2.querySelectorAll(OPTION_BUTTONS)).filter((b) => !isLeftOut(b));
+      const choices = buttons.map((button) => ({
+        label: squash(button.getAttribute("data-bolna-option") || button.textContent),
+        element: button,
+        picked: () => pressed(button)
+      }));
+      if (!choices.length) continue;
+      const label = groupLabel(element2, declared);
+      add(declared, { ...clickField(choices), info: { ...base(label, "choice", required), options: choices.map((c) => c.label) } });
+    }
+  }
+  return fields;
+}
+function base(label, kind, required) {
+  return { label: label || "Field", kind, input_type: "", required, options: [] };
+}
+function fieldName(text) {
+  let name = text.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, NAME_MAX_CHARS);
+  if (!/^[a-z]/.test(name)) name = `field_${name}`.slice(0, NAME_MAX_CHARS);
+  return name.replace(/_+$/, "") || "field";
+}
+var PageFiller = class {
+  constructor(form, options, onUpdate, onError) {
+    this.form = form;
+    this.options = options;
+    this.onUpdate = onUpdate;
+    this.onError = onError;
+    this.fields = [];
+    this.access = null;
+    this.running = false;
+    this.timer = null;
+    this.delayMs = POLL_MS2;
+    this.failing = false;
+    this.attached = false;
+    this.version = "";
+    this.appliedVersion = 0;
+    this.typing = false;
+    this.handledQuestion = "";
+    this.lastSchema = "";
+    this.lastPosted = "";
+    this.valuesTimer = null;
+    this.rescanTimer = null;
+    this.observer = null;
+    this.reportWaiter = null;
+    // An outcome Bolna hasn't taken yet. Only the report is retried: the form is never sent twice.
+    this.unsentOutcome = null;
+    this.onCallerInput = () => {
+      if (!this.typing) this.scheduleValues();
+    };
+  }
+  /** The form's fields as the agent sees them. */
+  get fieldList() {
+    return (this.fields.length ? this.fields : scanForm(this.form)).map((field) => field.info);
+  }
+  start(access) {
+    if (this.running) return;
+    this.access = access;
+    this.running = true;
+    this.attached = false;
+    this.version = "";
+    this.appliedVersion = 0;
+    this.handledQuestion = "";
+    this.lastSchema = "";
+    this.lastPosted = "";
+    this.delayMs = POLL_MS2;
+    this.form.addEventListener("input", this.onCallerInput, true);
+    this.form.addEventListener("change", this.onCallerInput, true);
+    if (typeof MutationObserver !== "undefined") {
+      this.observer = new MutationObserver(() => this.scheduleRescan());
+      this.observer.observe(this.form, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["hidden", "disabled", "aria-hidden", "aria-pressed", "aria-checked", "aria-selected"]
+      });
+    }
+    this.update({ state: "connecting" });
+    this.schedule(0);
+  }
+  /** The call ended, or the app detached the form. */
+  stop() {
+    if (!this.running) return;
+    this.halt();
+    this.update({ state: "stopped" });
+  }
+  halt() {
+    this.running = false;
+    for (const timer of [this.timer, this.valuesTimer, this.rescanTimer]) if (timer) clearTimeout(timer);
+    this.timer = this.valuesTimer = this.rescanTimer = null;
+    this.observer?.disconnect();
+    this.observer = null;
+    this.form.removeEventListener("input", this.onCallerInput, true);
+    this.form.removeEventListener("change", this.onCallerInput, true);
+    this.reportWaiter?.({ submitted: false, error: "The call ended before the page said." });
+  }
+  reportSubmitted(reference = "") {
+    this.reportWaiter?.({ submitted: true, reference });
+  }
+  reportFailed(reason) {
+    this.reportWaiter?.({ submitted: false, error: reason || "The form wasn't sent." });
+  }
+  update(update) {
+    this.onUpdate(update);
+  }
+  schedule(delayMs) {
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = this.running ? setTimeout(() => void this.poll(), delayMs) : null;
+  }
+  async poll() {
+    this.timer = null;
+    try {
+      if (this.unsentOutcome) await this.sendOutcome();
+      if (!this.attached) await this.attach();
+      const view = await this.fetchView();
+      if (!this.running) return;
+      this.delayMs = POLL_MS2;
+      this.failing = false;
+      if (view) await this.follow(view);
+    } catch (err) {
+      if (!this.running) return;
+      if (err instanceof PageNotAttached) {
+        this.attached = false;
+        this.version = "";
+      } else {
+        this.delayMs = Math.min(this.delayMs * 2, MAX_BACKOFF_MS2);
+        if (!this.failing) {
+          this.failing = true;
+          const reason = err instanceof Error ? err.message : String(err);
+          this.onError({ code: "page_failed", message: `Couldn't reach Bolna for the page's form: ${reason}` });
+        }
+      }
+    }
+    if (this.running) this.schedule(this.delayMs);
+  }
+  async follow(view) {
+    this.version = view.version;
+    if (view.pending_version > this.appliedVersion) {
+      await this.typePending(view.pending, view.pending_version);
+    }
+    if (FINISHED2.has(view.status)) {
+      this.halt();
+      return;
+    }
+    if (view.submit && view.submit.question_id !== this.handledQuestion) {
+      this.handledQuestion = view.submit.question_id;
+      await this.submit(view.submit.question_id, view.submit.values);
+    } else if (!this.typing) {
+      this.update({ state: view.status === "waiting" ? "confirming" : "ready" });
+    }
+  }
+  async typePending(pending, version) {
+    this.typing = true;
+    try {
+      for (const field of this.fields) {
+        if (!this.running) return;
+        if (!(field.info.name in pending)) continue;
+        this.update({ state: "typing", field: field.info.label });
+        await field.apply(pending[field.info.name], this.options.typingDelayMs ?? DEFAULT_TYPING_DELAY_MS, () => this.running);
+      }
+    } finally {
+      this.typing = false;
+    }
+    this.appliedVersion = version;
+    await this.postValues(true);
+  }
+  async submit(questionId, confirmed) {
+    const values = this.values();
+    const changed = Object.entries(confirmed).some(([name, value]) => !same(values[name] ?? "", value));
+    if (changed) {
+      this.unsentOutcome = { question_id: questionId, changed: true };
+      this.update({ state: "ready", detail: "The form changed after the yes, so it is read back again." });
+      await this.sendOutcome();
+      return;
+    }
+    this.update({ state: "submitting" });
+    let outcome;
+    try {
+      if (this.options.submit) {
+        const result = await this.options.submit(values);
+        outcome = { submitted: true, reference: result?.reference ?? "" };
+      } else {
+        outcome = await this.submitThroughPage();
+      }
+    } catch (err) {
+      outcome = { submitted: false, error: err instanceof Error ? err.message : String(err) };
+    }
+    this.unsentOutcome = {
+      question_id: questionId,
+      submitted: outcome.submitted,
+      reference: referenceId(outcome.reference ?? ""),
+      error: (outcome.error ?? "").replace(/\s+/g, " ").trim().slice(0, REASON_MAX_CHARS)
+    };
+    this.update(
+      outcome.submitted ? { state: "submitted", detail: outcome.reference ?? "" } : { state: "not_submitted", detail: outcome.error ?? "" }
+    );
+    if (this.running) await this.sendOutcome();
+  }
+  async sendOutcome() {
+    const outcome = this.unsentOutcome;
+    if (!outcome) return;
+    await this.post("page/outcome", outcome);
+    this.unsentOutcome = null;
+  }
+  /** The form's own submit, as its button would do it. The app says how it went with reportSubmitted or
+   *  reportFailed; a form that leaves the page needs the submit option instead. */
+  submitThroughPage() {
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => finish({ submitted: false, error: NO_REPORT }), REPORT_WAIT_MS);
+      const finish = (outcome) => {
+        clearTimeout(timeout);
+        this.reportWaiter = null;
+        resolve(outcome);
+      };
+      this.reportWaiter = finish;
+      if (this.form instanceof HTMLFormElement && typeof this.form.requestSubmit === "function") {
+        const invalid = Array.from(this.form.elements).find(
+          (element2) => "checkValidity" in element2 && !element2.checkValidity()
+        );
+        if (invalid) {
+          finish({ submitted: false, error: `The page refused ${labelOf(invalid)}: ${invalid.validationMessage}` });
+          return;
+        }
+        this.form.requestSubmit();
+      } else {
+        this.form.querySelector('[type="submit"], button:not([type="button"])')?.click();
+      }
+    });
+  }
+  values() {
+    return Object.fromEntries(this.fields.map((field) => [field.info.name, field.read()]));
+  }
+  scheduleValues() {
+    if (this.valuesTimer) clearTimeout(this.valuesTimer);
+    this.valuesTimer = setTimeout(() => {
+      this.valuesTimer = null;
+      void this.postValues(false).catch(() => {
+      });
+    }, VALUES_DEBOUNCE_MS);
+  }
+  scheduleRescan() {
+    if (this.rescanTimer) clearTimeout(this.rescanTimer);
+    this.rescanTimer = setTimeout(() => {
+      this.rescanTimer = null;
+      void this.rescan().catch(() => {
+      });
+    }, RESCAN_DEBOUNCE_MS);
+  }
+  /** Fields shown or hidden since the last scan reach Bolna; a button pressed by the caller reads as typing. */
+  async rescan() {
+    if (!this.running || !this.attached) return;
+    const fields = scanForm(this.form);
+    if (JSON.stringify(fields.map((field) => field.info)) !== this.lastSchema) await this.attach(fields);
+    if (!this.typing) await this.postValues(false);
+  }
+  async attach(fields = scanForm(this.form)) {
+    if (!fields.length) throw new Error("the form has no fields to fill");
+    this.fields = fields;
+    this.lastSchema = JSON.stringify(fields.map((field) => field.info));
+    await this.post("page/attach", { page_url: location.href, fields: fields.map((field) => field.info) });
+    if (!this.attached) this.update({ state: "ready" });
+    this.attached = true;
+  }
+  async postValues(force) {
+    if (!this.running || !this.attached) return;
+    const body = { applied_version: this.appliedVersion, values: this.values() };
+    const serialized = JSON.stringify(body);
+    if (!force && serialized === this.lastPosted) return;
+    this.lastPosted = serialized;
+    await this.post("page/values", body);
+  }
+  async post(path, body) {
+    const response = await this.request(path, body);
+    if (!response.ok) throw new Error(await this.reason(response));
+  }
+  async fetchView() {
+    const response = await this.request(`page${this.version ? `?since=${encodeURIComponent(this.version)}` : ""}`);
+    if (response.status === 204) return null;
+    if (response.status === 404) throw new PageNotAttached();
+    if (!response.ok) throw new Error(await this.reason(response));
+    return await response.json();
+  }
+  async request(path, body) {
+    const access = this.access;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS2);
+    try {
+      return await fetch(`${access.api_base_url.replace(/\/+$/, "")}/browser-agent/${path}`, {
+        method: body === void 0 ? "GET" : "POST",
+        headers: {
+          Authorization: `Bearer ${access.token}`,
+          ...body === void 0 ? {} : { "Content-Type": "application/json" }
+        },
+        body: body === void 0 ? void 0 : JSON.stringify(body),
+        cache: "no-store",
+        signal: controller.signal
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+  async reason(response) {
+    const body = await response.json().catch(() => ({}));
+    return body.message || `HTTP ${response.status}`;
+  }
+};
+function referenceId(reference) {
+  return reference.trim().replace(/\s+/g, "-").replace(/[^A-Za-z0-9._/#:-]/g, "").replace(/^[^A-Za-z0-9]+/, "").slice(0, REFERENCE_MAX_CHARS);
+}
+
+// src/panel.ts
+var STYLE_ID = "bolna-browser-panel-style";
+var WAIT_TICK_MS = 1e3;
+var STYLE = `
+.bolna-bp{--bolna-bp-bg:#fff;--bolna-bp-fg:#16181d;--bolna-bp-muted:#5f6672;--bolna-bp-border:#d9dce1;--bolna-bp-accent:#2563eb;--bolna-bp-radius:10px;display:grid;gap:10px;box-sizing:border-box;max-width:100%;padding:12px;color:var(--bolna-bp-fg);background:var(--bolna-bp-bg);border:1px solid var(--bolna-bp-border);border-radius:var(--bolna-bp-radius);font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+.bolna-bp [hidden]{display:none!important}
+.bolna-bp-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.bolna-bp-title{font-weight:600}
+.bolna-bp-status{color:var(--bolna-bp-muted)}
+.bolna-bp[data-status=waiting] .bolna-bp-status{color:var(--bolna-bp-accent);font-weight:600}
+.bolna-bp-banner{margin:0;padding:8px 10px;border:1px solid var(--bolna-bp-border);border-radius:8px;overflow-wrap:anywhere}
+.bolna-bp[data-status=waiting] .bolna-bp-banner{border-color:var(--bolna-bp-accent)}
+.bolna-bp-shot{display:block;width:100%;height:auto;border:1px solid var(--bolna-bp-border);border-radius:6px}
+.bolna-bp-steps{margin:0;padding-left:20px;color:var(--bolna-bp-muted);overflow-wrap:anywhere}
+`;
+function describeBrowserView(view) {
+  if (!view) return { status: "Not started", detail: "" };
+  switch (view.status) {
+    case "queued":
+      return { status: "Starting", detail: "" };
+    case "running":
+      return { status: "Working", detail: view.progress };
+    case "waiting":
+      return view.awaiting === "confirmation" ? { status: "Please confirm", detail: view.confirm_summary } : { status: "Needs your answer", detail: view.question };
+    case "done":
+      if (view.kind === "form_fill" || view.kind === "page_fill") {
+        return view.submitted ? { status: "Submitted", detail: view.reference } : { status: "Not submitted", detail: view.answer };
+      }
+      return { status: "Done", detail: view.answer };
+    case "failed":
+      return { status: "Couldn't finish", detail: view.error };
+    default:
+      return { status: "Stopped", detail: view.error };
+  }
+}
+function formatWait(seconds) {
+  const whole = Math.max(0, Math.floor(seconds));
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
+}
+function element(doc, tag, className) {
+  const node = doc.createElement(tag);
+  node.className = className;
+  return node;
+}
+function installStyle(container) {
+  const doc = container.ownerDocument;
+  const root = container.getRootNode();
+  const host = typeof ShadowRoot !== "undefined" && root instanceof ShadowRoot ? root : doc.head;
+  if (host.querySelector(`#${STYLE_ID}`)) return;
+  const style = doc.createElement("style");
+  style.id = STYLE_ID;
+  style.textContent = STYLE;
+  host.append(style);
+}
+function mountBrowserPanel(call, container, options = {}) {
+  const doc = container.ownerDocument;
+  installStyle(container);
+  const title = options.title ?? "Browser";
+  const root = element(doc, "section", "bolna-bp");
+  root.setAttribute("aria-label", title);
+  const head = element(doc, "div", "bolna-bp-head");
+  const heading = element(doc, "span", "bolna-bp-title");
+  heading.textContent = title;
+  const status = element(doc, "span", "bolna-bp-status");
+  head.append(heading, status);
+  const detail = element(doc, "p", "bolna-bp-banner");
+  detail.setAttribute("aria-live", "polite");
+  const screenshot = element(doc, "img", "bolna-bp-shot");
+  screenshot.alt = "What the browser sees";
+  const steps = element(doc, "ol", "bolna-bp-steps");
+  root.append(head, detail, screenshot, steps);
+  container.append(root);
+  let waitTimer = null;
+  const stopWaitTimer = () => {
+    if (waitTimer) clearInterval(waitTimer);
+    waitTimer = null;
+  };
+  const render = (view) => {
+    const described = describeBrowserView(view);
+    root.dataset.status = view?.status ?? "none";
+    status.textContent = described.status;
+    stopWaitTimer();
+    if (view?.status === "waiting") {
+      const since = Date.now() - (view.waiting_seconds ?? 0) * 1e3;
+      const tick = () => {
+        status.textContent = `${described.status} \xB7 waiting ${formatWait((Date.now() - since) / 1e3)}`;
+      };
+      tick();
+      waitTimer = setInterval(tick, WAIT_TICK_MS);
+    }
+    detail.textContent = described.detail;
+    detail.hidden = !described.detail;
+    if (view?.screenshot_url) screenshot.src = view.screenshot_url;
+    screenshot.hidden = !view?.screenshot_url;
+    steps.replaceChildren(
+      ...(view?.recent_actions ?? []).map((line) => {
+        const item = doc.createElement("li");
+        item.textContent = line;
+        return item;
+      })
+    );
+    steps.hidden = steps.childElementCount === 0;
+  };
+  render(call.getBrowserView());
+  call.on("browser-update", render);
+  return () => {
+    call.off("browser-update", render);
+    stopWaitTimer();
+    root.remove();
+  };
+}
 
 // src/call.ts
 var DIAL_EXTENSION = "7000";
@@ -12706,6 +13497,9 @@ var BolnaWebCall = class extends Emitter {
     // preflightMicrophone()/connect() that resumes later knows it was cancelled and must not
     // resurrect a call the caller already tried to end
     this.startToken = null;
+    this.browserAccess = null;
+    this.browserWatcher = null;
+    this.pageFillers = /* @__PURE__ */ new Set();
     const sources = [options.sessionUrl, options.getSession, options.session].filter(Boolean);
     if (sources.length !== 1) {
       throw new Error("BolnaWebCall: provide exactly one of sessionUrl, getSession, or session");
@@ -12720,6 +13514,36 @@ var BolnaWebCall = class extends Emitter {
   }
   isMuted() {
     return this.muted;
+  }
+  /** What the browser the agent drives last showed on this call, or null. Kept after the call ends, until the
+   *  next start(). */
+  getBrowserView() {
+    return this.browserWatcher?.view ?? null;
+  }
+  /** Let the agent fill this form on your page while the caller talks: each value types in as the caller says it,
+   *  the agent reads the form back from the page, and the form is submitted only after the caller's yes. Call it
+   *  before or during a call; it works on every call this instance makes until detach(). Needs an agent with
+   *  mid-call events on. */
+  attachPage(form, options = {}) {
+    const filler = new PageFiller(
+      form,
+      options,
+      (update) => this.emit("page-update", update),
+      (error) => this.emit("page-error", error)
+    );
+    this.pageFillers.add(filler);
+    if (this.state === "active") this.startPageFiller(filler);
+    return {
+      get fields() {
+        return filler.fieldList;
+      },
+      detach: () => {
+        filler.stop();
+        this.pageFillers.delete(filler);
+      },
+      reportSubmitted: (reference) => filler.reportSubmitted(reference),
+      reportFailed: (reason) => filler.reportFailed(reason)
+    };
   }
   /** Mute/unmute the microphone (local track toggle — the call stays up). */
   setMuted(muted) {
@@ -12740,11 +13564,15 @@ var BolnaWebCall = class extends Emitter {
     const token = this.startToken = /* @__PURE__ */ Symbol("start");
     this.endedByUs = false;
     this.muted = false;
+    this.browserWatcher?.release();
+    this.browserWatcher = null;
     this.setState("connecting");
     try {
       const session = await this.fetchSession(options?.userData ?? this.options.userData);
       if (token !== this.startToken) return;
       this.runId = session.run_id;
+      const view = session.browser_view;
+      this.browserAccess = view?.token && view.api_base_url ? view : null;
       const audioConstraints = { ...DEFAULT_AUDIO, ...this.options.audio ?? {} };
       await this.preflightMicrophone(audioConstraints);
       if (token !== this.startToken) return;
@@ -12757,6 +13585,8 @@ var BolnaWebCall = class extends Emitter {
       }
       this.setState("active");
       this.emit("call-start");
+      this.followBrowser();
+      for (const filler of this.pageFillers) this.startPageFiller(filler);
     } catch (err) {
       if (token !== this.startToken) return;
       const callError = this.toCallError(err);
@@ -12772,6 +13602,29 @@ var BolnaWebCall = class extends Emitter {
     this.endedByUs = true;
     await this.sendHangup();
     this.teardown("local-hangup");
+  }
+  // ------------------------------------------------------------------
+  // browser view
+  // ------------------------------------------------------------------
+  startPageFiller(filler) {
+    if (!this.browserAccess) {
+      this.emit("page-error", {
+        code: "page_unavailable",
+        message: "This call's agent can't fill the page: turn on mid-call events for it."
+      });
+      return;
+    }
+    filler.start(this.browserAccess);
+  }
+  followBrowser() {
+    if (!this.browserAccess) return;
+    this.browserWatcher = new BrowserWatcher(
+      this.browserAccess,
+      (view) => this.emit("browser-update", view),
+      (error) => this.emit("browser-error", error)
+    );
+    this.browserWatcher.start();
+    this.emit("browser-ready");
   }
   // ------------------------------------------------------------------
   // session minting
@@ -12848,9 +13701,9 @@ var BolnaWebCall = class extends Emitter {
     pc.getReceivers().forEach((receiver) => {
       if (receiver.track) stream.addTrack(receiver.track);
     });
-    const element = this.ensureAudioElement();
-    element.srcObject = stream;
-    element.play().catch((err) => {
+    const element2 = this.ensureAudioElement();
+    element2.srcObject = stream;
+    element2.play().catch((err) => {
       this.emit(
         "error",
         this.toCallError(
@@ -13027,6 +13880,8 @@ var BolnaWebCall = class extends Emitter {
     window.addEventListener("pagehide", this.pagehideHandler);
   }
   teardown(reason, emitEnd = true) {
+    this.browserWatcher?.finish();
+    for (const filler of this.pageFillers) filler.stop();
     if (this.pagehideHandler) {
       window.removeEventListener("pagehide", this.pagehideHandler);
       this.pagehideHandler = null;
@@ -13087,7 +13942,12 @@ var BolnaWebCall = class extends Emitter {
     return { code: "connect_failed", message: err instanceof Error ? err.message : String(err), cause: err };
   }
 };
+/** For the CDN build, where the global is this class: BolnaWebCall.mountBrowserPanel(call, element). */
+BolnaWebCall.mountBrowserPanel = mountBrowserPanel;
 export {
-  BolnaWebCall
+  BolnaWebCall,
+  fieldName,
+  mountBrowserPanel,
+  scanForm
 };
 //# sourceMappingURL=index.js.map

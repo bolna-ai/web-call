@@ -39,6 +39,48 @@ test("the built CDN bundle loads and exposes window.BolnaWebCall with correct co
   expect(result.oneSourceOk).toBe(true);
 });
 
+test("the built CDN bundle's browser panel mounts in a real page and shows a view as text", async ({ page }) => {
+  await page.goto("/");
+  const result = await page.evaluate(() => {
+    const call = new window.BolnaWebCall({ session: { run_id: "x" } });
+    const container = document.createElement("div");
+    document.body.append(container);
+    const unmount = window.BolnaWebCall.mountBrowserPanel(call, container, { title: "Your form" });
+    const read = (selector: string) => container.querySelector(selector) as HTMLElement;
+    const before = read(".bolna-bp-status").textContent;
+    // emit is protected only in TypeScript; this stands in for an update from Bolna's view endpoint
+    call.emit("browser-update", {
+      status: "waiting",
+      awaiting: "answer",
+      question: "<b>Which size?</b>",
+      kind: "form_fill",
+      recent_actions: ["Typed into 'Name'"],
+      screenshot_url: null,
+    });
+    const out = {
+      before,
+      title: read(".bolna-bp-title").textContent,
+      status: read(".bolna-bp-status").textContent,
+      question: read(".bolna-bp-banner").textContent,
+      markup: read(".bolna-bp-banner").children.length,
+      layout: getComputedStyle(read(".bolna-bp")).display,
+      screenshotShown: getComputedStyle(read(".bolna-bp-shot")).display !== "none",
+    };
+    unmount();
+    return { ...out, removed: container.children.length === 0 };
+  });
+  expect(result).toEqual({
+    before: "Not started",
+    title: "Your form",
+    status: "Needs your answer · waiting 0:00",
+    question: "<b>Which size?</b>",
+    markup: 0,
+    layout: "grid",
+    screenshotShown: false,
+    removed: true,
+  });
+});
+
 test("real getUserMedia (fake device) grants mic permission, then a real fetch to an unreachable SIP host fails as connect_failed", async ({ page }) => {
   await page.goto("/");
   const events = await page.evaluate(async () => {
