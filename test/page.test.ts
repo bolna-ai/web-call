@@ -114,6 +114,9 @@ describe("scanForm", () => {
     expect(fieldName("What's your LinkedIn?")).toBe("what_s_your_linkedin");
     expect(fieldName("2nd address")).toBe("field_2nd_address");
     expect(fieldName("")).toBe("field");
+    expect(fieldName("__Email__")).toBe("email");
+    expect(fieldName("_".repeat(50_000) + "x")).toBe("x");
+    expect(fieldName("a" + "!".repeat(50_000))).toBe("a");
   });
 });
 

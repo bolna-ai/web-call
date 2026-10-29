@@ -13051,9 +13051,16 @@ function base(label, kind, required) {
   return { label: label || "Field", kind, input_type: "", required, options: [] };
 }
 function fieldName(text) {
-  let name = text.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, NAME_MAX_CHARS);
+  let name = trimUnderscores(text.toLowerCase().replace(/[^a-z0-9]+/g, "_")).slice(0, NAME_MAX_CHARS);
   if (!/^[a-z]/.test(name)) name = `field_${name}`.slice(0, NAME_MAX_CHARS);
-  return name.replace(/_+$/, "") || "field";
+  return trimUnderscores(name) || "field";
+}
+function trimUnderscores(text) {
+  let start = 0;
+  let end = text.length;
+  while (start < end && text[start] === "_") start += 1;
+  while (end > start && text[end - 1] === "_") end -= 1;
+  return text.slice(start, end);
 }
 var PageFiller = class {
   constructor(form, options, onUpdate, onError) {
