@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { BrowserView, BrowserViewError } from "../src/types";
 import * as FakeSip from "./support/fake-sip";
 import { freshSipControl, setSipControl, SessionState } from "./support/fake-sip";
 import { freshBrowserControl, freshSession, setBrowserControl, getFakeWindow } from "./support/browser-env";
+import { browserView, serveBrowserView } from "./support/view-server";
 
 vi.mock("sip.js", async () => {
   const fake = await import("./support/fake-sip");
@@ -388,5 +390,125 @@ describe("pagehide teardown", () => {
 
     expect(events.some((e) => e[0] === "call-end")).toBe(true);
     expect(call.getState()).toBe("ended");
+  });
+});
+
+describe("browser view", () => {
+  const VIEW_KEY = { token: "bvt_key", api_base_url: "https://api.example.com" };
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("a form attached to a call whose agent can't fill pages says so instead of waiting", async () => {
+    const call = new BolnaWebCall({ session: freshSession() });
+    const errors: unknown[] = [];
+    call.on("page-error", (error) => errors.push(error));
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+
+    call.attachPage({ addEventListener() {}, removeEventListener() {}, querySelectorAll: () => [] } as never);
+    await settle(call.start());
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(errors).toEqual([expect.objectContaining({ code: "page_unavailable" })]);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("follows the browser once the call is active, and after it ends looks until the outcome shows", async () => {
+    const server = serveBrowserView([
+      browserView({ status: "waiting", awaiting: "answer", question: "Which size?" }),
+      204,
+      browserView({ version: "2", status: "stopped", error: "call ended" }),
+    ]);
+    const call = new BolnaWebCall({ session: freshSession({ browser_view: VIEW_KEY }) });
+    const events = recorder(call);
+    const updates: BrowserView[] = [];
+    call.on("browser-ready", () => events.push(["browser-ready"]));
+    call.on("browser-update", (view) => updates.push(view));
+
+    await settle(call.start());
+    await vi.advanceTimersByTimeAsync(0);
+
+    const names = events.map((e) => e[0]);
+    expect(names.indexOf("browser-ready")).toBeGreaterThan(names.indexOf("call-start"));
+    expect(updates[0]).toMatchObject({ status: "waiting", question: "Which size?" });
+    expect(server.requests[0].authorization).toBe("Bearer bvt_key");
+
+    await settle(call.stop());
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    // the browser stops once the call ends, and the view gets to say so
+    expect(updates.at(-1)).toMatchObject({ status: "stopped", error: "call ended" });
+    const asked = server.requests.length;
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(server.requests).toHaveLength(asked);
+    expect(call.getBrowserView()).toMatchObject({ status: "stopped" });
+  });
+
+  it("after the call ends, stops looking once the grace period passes without an outcome", async () => {
+    const server = serveBrowserView([browserView({ status: "running" }), 204]);
+    const call = new BolnaWebCall({ session: freshSession({ browser_view: VIEW_KEY }) });
+
+    await settle(call.start());
+    await vi.advanceTimersByTimeAsync(0);
+    await settle(call.stop());
+    await vi.advanceTimersByTimeAsync(16_000);
+    const asked = server.requests.length;
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(server.requests).toHaveLength(asked);
+    expect(call.getBrowserView()).toMatchObject({ status: "running" });
+  });
+
+  it("a second call on the same instance follows its own browser and frees the first one's screenshot", async () => {
+    serveBrowserView([browserView({ version: "1" }), 204]);
+    const revoke = vi.spyOn(URL, "revokeObjectURL");
+    const call = new BolnaWebCall({ getSession: async () => freshSession({ browser_view: VIEW_KEY }) });
+
+    await settle(call.start());
+    await vi.advanceTimersByTimeAsync(0);
+    const first = call.getBrowserView()!;
+    await settle(call.stop());
+    // ended, the first call's view and screenshot stay usable
+    expect(revoke).not.toHaveBeenCalledWith(first.screenshot_url);
+
+    serveBrowserView([browserView({ version: "9", progress: "Second call" }), 204]);
+    await settle(call.start());
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(revoke).toHaveBeenCalledWith(first.screenshot_url);
+    expect(call.getBrowserView()).toMatchObject({ version: "9", progress: "Second call" });
+    revoke.mockRestore();
+  });
+
+  it.each([
+    ["no view key", freshSession()],
+    ["a key without an API address", freshSession({ browser_view: { token: "bvt_key", api_base_url: "" } })],
+  ])("asks nothing about a browser with %s", async (_label, session) => {
+    const server = serveBrowserView([browserView()]);
+    const call = new BolnaWebCall({ session });
+    const events = recorder(call);
+    call.on("browser-ready", () => events.push(["browser-ready"]));
+
+    await settle(call.start());
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(server.requests).toHaveLength(0);
+    expect(events.some((e) => e[0] === "browser-ready")).toBe(false);
+    expect(call.getBrowserView()).toBeNull();
+  });
+
+  it("a problem following the browser never ends the call", async () => {
+    serveBrowserView([404]);
+    const call = new BolnaWebCall({ session: freshSession({ browser_view: VIEW_KEY }) });
+    const errors: BrowserViewError[] = [];
+    call.on("browser-error", (error) => errors.push(error));
+
+    await settle(call.start());
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(errors).toEqual([expect.objectContaining({ code: "view_expired" })]);
+    expect(call.getState()).toBe("active");
   });
 });

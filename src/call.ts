@@ -1,12 +1,19 @@
 import { Inviter, Registerer, SessionState, UserAgent } from "sip.js";
 
+import { BrowserWatcher } from "./browser";
 import { Emitter } from "./events";
+import { PageFiller } from "./page";
+import { mountBrowserPanel } from "./panel";
 import type {
+  AttachPageOptions,
   BolnaWebCallEvents,
   BolnaWebCallOptions,
+  BrowserView,
+  BrowserViewAccess,
   CallError,
   CallState,
   ErrorCode,
+  PageConnection,
   Session,
 } from "./types";
 
@@ -37,6 +44,9 @@ class WebCallError extends Error {
 }
 
 export class BolnaWebCall extends Emitter<BolnaWebCallEvents> {
+  /** For the CDN build, where the global is this class: BolnaWebCall.mountBrowserPanel(call, element). */
+  static readonly mountBrowserPanel = mountBrowserPanel;
+
   private options: BolnaWebCallOptions;
   private state: CallState = "idle";
   private runId: string | null = null;
@@ -57,6 +67,9 @@ export class BolnaWebCall extends Emitter<BolnaWebCallEvents> {
   // preflightMicrophone()/connect() that resumes later knows it was cancelled and must not
   // resurrect a call the caller already tried to end
   private startToken: symbol | null = null;
+  private browserAccess: BrowserViewAccess | null = null;
+  private browserWatcher: BrowserWatcher | null = null;
+  private pageFillers = new Set<PageFiller>();
 
   constructor(options: BolnaWebCallOptions) {
     super();
@@ -77,6 +90,38 @@ export class BolnaWebCall extends Emitter<BolnaWebCallEvents> {
 
   isMuted(): boolean {
     return this.muted;
+  }
+
+  /** What the browser the agent drives last showed on this call, or null. Kept after the call ends, until the
+   *  next start(). */
+  getBrowserView(): BrowserView | null {
+    return this.browserWatcher?.view ?? null;
+  }
+
+  /** Let the agent fill this form on your page while the caller talks: each value types in as the caller says it,
+   *  the agent reads the form back from the page, and the form is submitted only after the caller's yes. Call it
+   *  before or during a call; it works on every call this instance makes until detach(). Needs an agent with
+   *  mid-call events on. */
+  attachPage(form: HTMLElement, options: AttachPageOptions = {}): PageConnection {
+    const filler = new PageFiller(
+      form,
+      options,
+      (update) => this.emit("page-update", update),
+      (error) => this.emit("page-error", error),
+    );
+    this.pageFillers.add(filler);
+    if (this.state === "active") this.startPageFiller(filler);
+    return {
+      get fields() {
+        return filler.fieldList;
+      },
+      detach: () => {
+        filler.stop();
+        this.pageFillers.delete(filler);
+      },
+      reportSubmitted: (reference) => filler.reportSubmitted(reference),
+      reportFailed: (reason) => filler.reportFailed(reason),
+    };
   }
 
   /** Mute/unmute the microphone (local track toggle — the call stays up). */
@@ -101,6 +146,8 @@ export class BolnaWebCall extends Emitter<BolnaWebCallEvents> {
     const token = (this.startToken = Symbol("start"));
     this.endedByUs = false;
     this.muted = false;
+    this.browserWatcher?.release();
+    this.browserWatcher = null;
     this.setState("connecting");
 
     try {
@@ -108,6 +155,8 @@ export class BolnaWebCall extends Emitter<BolnaWebCallEvents> {
       // stop() was called while the session was minting — abandon before dialing anything
       if (token !== this.startToken) return;
       this.runId = session.run_id;
+      const view = session.browser_view;
+      this.browserAccess = view?.token && view.api_base_url ? view : null;
 
       // acquire the mic BEFORE signaling: permission-denied fails fast and no slot-holding
       // SIP dialog is created for a call that can never have audio
@@ -127,6 +176,8 @@ export class BolnaWebCall extends Emitter<BolnaWebCallEvents> {
       }
       this.setState("active");
       this.emit("call-start");
+      this.followBrowser();
+      for (const filler of this.pageFillers) this.startPageFiller(filler);
     } catch (err) {
       // a cancelled attempt failing on its way out (e.g. connect() throwing after stop()
       // already tore everything down) isn't a user-facing error — stop() already handled it
@@ -145,6 +196,32 @@ export class BolnaWebCall extends Emitter<BolnaWebCallEvents> {
     this.endedByUs = true;
     await this.sendHangup();
     this.teardown("local-hangup");
+  }
+
+  // ------------------------------------------------------------------
+  // browser view
+  // ------------------------------------------------------------------
+
+  private startPageFiller(filler: PageFiller): void {
+    if (!this.browserAccess) {
+      this.emit("page-error", {
+        code: "page_unavailable",
+        message: "This call's agent can't fill the page: turn on mid-call events for it.",
+      });
+      return;
+    }
+    filler.start(this.browserAccess);
+  }
+
+  private followBrowser(): void {
+    if (!this.browserAccess) return;
+    this.browserWatcher = new BrowserWatcher(
+      this.browserAccess,
+      (view) => this.emit("browser-update", view),
+      (error) => this.emit("browser-error", error),
+    );
+    this.browserWatcher.start();
+    this.emit("browser-ready");
   }
 
   // ------------------------------------------------------------------
@@ -445,6 +522,8 @@ export class BolnaWebCall extends Emitter<BolnaWebCallEvents> {
   }
 
   private teardown(reason: string, emitEnd = true): void {
+    this.browserWatcher?.finish();
+    for (const filler of this.pageFillers) filler.stop();
     if (this.pagehideHandler) {
       window.removeEventListener("pagehide", this.pagehideHandler);
       this.pagehideHandler = null;
