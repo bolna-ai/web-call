@@ -1,10 +1,13 @@
-# Rails version of the same route. In config/routes.rb:
+# Rails version of the same route. Save as app/controllers/bolna_sessions_controller.rb.
+# In config/routes.rb:
 #   post "/api/bolna-session", to: "bolna_sessions#create"
 require "net/http"
 
 class BolnaSessionsController < ApplicationController
   before_action :authenticate_user! # YOUR auth
-  skip_forgery_protection only: :create # the SDK POSTs JSON without a CSRF token; use getSession to send one instead
+  # The SDK POSTs application/json without a CSRF token. Cross-site pages can't send that content type
+  # without a CORS preflight, so only JSON requests skip the token check.
+  skip_forgery_protection only: :create, if: -> { request.media_type == "application/json" }
 
   def create
     payload = { agent_id: ENV.fetch("BOLNA_AGENT_ID") }
