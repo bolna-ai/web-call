@@ -37,6 +37,27 @@ public class BolnaSession {
         System.out.println("session proxy on http://localhost:" + port + "/api/bolna-session");
     }
 
+    // True when s is exactly one balanced JSON object, so a body like
+    // {"user_data":{},"agent_id":"other"} cannot smuggle extra top-level fields.
+    static boolean isOneObject(String s) {
+        int depth = 0;
+        boolean inString = false;
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (inString) {
+                if (c == '\\') i++;
+                else if (c == '"') inString = false;
+            } else if (c == '"') {
+                inString = true;
+            } else if (c == '{' || c == '[') {
+                depth++;
+            } else if (c == '}' || c == ']') {
+                if (--depth == 0 && i != s.length() - 1) return false;
+            }
+        }
+        return depth == 0 && !inString;
+    }
+
     static void handle(HttpExchange ex) throws IOException {
         if (!"POST".equals(ex.getRequestMethod())) {
             ex.sendResponseHeaders(405, -1);
@@ -46,7 +67,9 @@ public class BolnaSession {
         String in = new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
         Matcher m = USER_DATA.matcher(in);
         String agent = "\"agent_id\":\"" + AGENT_ID.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
-        String payload = m.matches() ? "{" + agent + ",\"user_data\":" + m.group(1) + "}" : "{" + agent + "}";
+        String payload = m.matches() && isOneObject(m.group(1))
+                ? "{" + agent + ",\"user_data\":" + m.group(1) + "}"
+                : "{" + agent + "}";
 
         HttpRequest req = HttpRequest.newBuilder(URI.create(API_BASE + "/web-call/session"))
                 .timeout(Duration.ofSeconds(15))
