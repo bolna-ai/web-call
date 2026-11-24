@@ -60,7 +60,7 @@ func main() {
 		log.Fatal("Set BOLNA_API_KEY (your bn- key) in the environment.")
 	}
 	http.HandleFunc("POST /api/bolna-session", bolnaSession)
-	addr := ":" + getenv("PORT", "8787")
-	log.Printf("session proxy on http://localhost%s/api/bolna-session", addr)
+	addr := getenv("HOST", "127.0.0.1") + ":" + getenv("PORT", "8787")
+	log.Printf("session proxy on http://%s/api/bolna-session", addr)
 	log.Fatal(http.ListenAndServe(addr, nil))
 }

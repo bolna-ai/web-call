@@ -28,7 +28,8 @@ Put your own user auth in front of the route so only signed-in users can start c
 | C# (ASP.NET Core) | [`csharp-aspnet/Program.cs`](csharp-aspnet/Program.cs) | `dotnet run` (.NET 8+) |
 
 Every runnable example reads `BOLNA_API_KEY`, `BOLNA_AGENT_ID`, `PORT` (default `8787`) and
-`BOLNA_API_BASE` (default `https://api.bolna.ai`) from the environment.
+`BOLNA_API_BASE` (default `https://api.bolna.ai`) from the environment. They listen on localhost only
+(the Go and Java ones take `HOST` to change that); put them behind your auth before exposing them.
 
 To start a multilingual agent in a chosen language, add `"agent_data": {"language": "hi"}` to the
 mint body (see the [docs](https://www.bolna.ai/docs/developer-resources/sdks/web-call#start-in-a-chosen-language)).

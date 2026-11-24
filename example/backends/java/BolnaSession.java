@@ -31,7 +31,7 @@ public class BolnaSession {
             System.exit(1);
         }
         int port = Integer.parseInt(Optional.ofNullable(System.getenv("PORT")).orElse("8787"));
-        HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);
+        HttpServer server = HttpServer.create(new InetSocketAddress(Optional.ofNullable(System.getenv("HOST")).orElse("127.0.0.1"), port), 0);
         server.createContext("/api/bolna-session", BolnaSession::handle);
         server.start();
         System.out.println("session proxy on http://localhost:" + port + "/api/bolna-session");
