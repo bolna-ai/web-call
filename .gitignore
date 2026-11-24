@@ -16,3 +16,9 @@ test-results/
 playwright-report/
 blob-report/
 playwright/.cache/
+
+# example backends: local build/install output
+example/backends/**/__pycache__/
+example/backends/**/.bundle/
+example/backends/**/bin/
+example/backends/**/obj/

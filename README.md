@@ -60,6 +60,10 @@ app.post("/api/bolna-session", async (req, res) => {
 A runnable version is in [`example/server-example.js`](example/server-example.js), and a full
 demo page in [`example/sip-example.html`](example/sip-example.html).
 
+The same route in Python, Go, Java, PHP, Ruby and C# (plus Spring, Laravel and Rails variants) is in
+[`example/backends`](example/backends). A React hook and a Vue 3 composable are in
+[`example/frameworks`](example/frameworks).
+
 The SDK deliberately has **no `apiKey` option**. The minted session expires in ~2 minutes and
 its SIP credential is consumed by the first call — leaking one is worth almost nothing.
 
