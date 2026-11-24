@@ -11,6 +11,52 @@ export interface Session {
   sip_register: boolean;
   expires_in: number;
   ice_servers: RTCIceServer[];
+  /** Present when the agent can drive a browser during the call (filling a form, looking something up).
+   *  The SDK uses it to follow the browser; see the browser-* events and mountBrowserPanel. */
+  browser_view?: BrowserViewAccess;
+}
+
+/** A per-call key to Bolna's read-only view of the browser the agent drives. Only covers this call. */
+export interface BrowserViewAccess {
+  token: string;
+  api_base_url: string;
+}
+
+export type BrowserStatus = "queued" | "running" | "waiting" | "done" | "failed" | "stopped";
+
+/** What the browser is doing on this call, as Bolna's GET /browser-agent/view returns it. */
+export interface BrowserView {
+  /** Changes with every update. */
+  version: string;
+  status: BrowserStatus;
+  /** page_fill: the caller's own page fills its form (see attachPage); there are no screenshots. */
+  kind: "lookup" | "form_fill" | "page_fill";
+  step: number;
+  progress: string;
+  /** The latest step lines, oldest first, such as "Typed into 'E-mail address'". Never the values typed. */
+  recent_actions: string[];
+  /** What a waiting form fill needs from the caller. */
+  awaiting: "none" | "answer" | "confirmation";
+  question: string;
+  /** The filled-in form, read from the page, that the caller is asked to confirm. */
+  confirm_summary: string;
+  /** How long the browser had waited on the caller when this view was read; 0 unless it is waiting. */
+  waiting_seconds: number;
+  submitted: boolean;
+  reference: string;
+  /** A lookup's answer, or why a form fill stopped short of submitting. */
+  answer: string;
+  error: string;
+  /** Object URL of the browser's latest screenshot, or null. The SDK revokes it once a newer one arrives or
+   *  the call ends. */
+  screenshot_url: string | null;
+}
+
+export interface BrowserViewError {
+  /** "view_expired": the call's key is no longer valid, so updates stop. "view_unavailable": a request
+   *  failed; the SDK keeps retrying with backoff. */
+  code: "view_expired" | "view_unavailable";
+  message: string;
 }
 
 export type CallState = "idle" | "connecting" | "ringing" | "active" | "ended";
@@ -60,6 +106,71 @@ export interface BolnaWebCallOptions {
   debug?: boolean;
 }
 
+export type PageFieldKind = "text" | "long_text" | "choice" | "checkbox";
+
+/** One field of a form connected with attachPage, as the agent sees it. */
+export interface PageField {
+  /** What the agent sends the value under: data-bolna-field, else the element's name, else its label. */
+  name: string;
+  label: string;
+  /** choice: one of options (a select, radio group or row of option buttons). checkbox: "yes" or "no". */
+  kind: PageFieldKind;
+  /** A text field's own type when it isn't plain text, such as "email" or "tel". */
+  input_type: string;
+  required: boolean;
+  options: string[];
+}
+
+export interface AttachPageOptions {
+  /** Sends the form after the caller's yes, with the values they confirmed: resolve with the site's reference
+   *  number if it gives one, or throw with why it failed. Without it the SDK calls the form's own submit, and your
+   *  submit handler says how it went with reportSubmitted or reportFailed (a form that leaves the page needs this
+   *  option instead). */
+  submit?: (values: Record<string, string>) => Promise<{ reference?: string } | void>;
+  /** Milliseconds per character as a value types in; 0 sets it at once. Default 18. */
+  typingDelayMs?: number;
+}
+
+/** What attachPage returns. */
+export interface PageConnection {
+  /** The form's fields as the agent sees them. */
+  readonly fields: PageField[];
+  /** Stop filling this form; the call goes on. */
+  detach(): void;
+  /** Your submit handler sent the form: tell the agent, with the site's reference number if any. */
+  reportSubmitted(reference?: string): void;
+  /** Your submit handler couldn't send the form: tell the agent why. */
+  reportFailed(reason: string): void;
+}
+
+/** connecting: telling Bolna about the form. ready: waiting for the agent. typing: filling a field. confirming:
+ *  the agent is reading the form back. submitting: the caller said yes. submitted / not_submitted: the outcome.
+ *  stopped: the call ended. */
+export type PageFillState =
+  | "connecting"
+  | "ready"
+  | "typing"
+  | "confirming"
+  | "submitting"
+  | "submitted"
+  | "not_submitted"
+  | "stopped";
+
+export interface PageFillUpdate {
+  state: PageFillState;
+  /** While typing, the label of the field being filled. */
+  field?: string;
+  /** The reference number once submitted, why it wasn't, or a note about the form. */
+  detail?: string;
+}
+
+export interface PageFillError {
+  /** page_unavailable: this call's agent can't fill pages (mid-call events off). page_failed: a request to Bolna
+   *  failed; the SDK keeps retrying. */
+  code: "page_unavailable" | "page_failed";
+  message: string;
+}
+
 export interface BolnaWebCallEvents {
   "state-change": (state: CallState) => void;
   "call-start": () => void;
@@ -68,4 +179,14 @@ export interface BolnaWebCallEvents {
   "media-permission": () => void;
   /** Remote (agent) audio level 0..1, ~10 updates/sec while the call is active. */
   "volume-level": (level: number) => void;
+  /** The call has a browser to follow: emitted once the call is active, when the session carried browser_view. */
+  "browser-ready": () => void;
+  /** The browser moved on: a new step, a question for the caller, a read-back, or its outcome. */
+  "browser-update": (view: BrowserView) => void;
+  /** Following the browser hit a problem. Never ends the call. */
+  "browser-error": (error: BrowserViewError) => void;
+  /** A form connected with attachPage moved on: typing a field, being read back, submitted. */
+  "page-update": (update: PageFillUpdate) => void;
+  /** Filling a form connected with attachPage hit a problem. Never ends the call. */
+  "page-error": (error: PageFillError) => void;
 }

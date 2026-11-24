@@ -1,0 +1,359 @@
+<!doctype html>
+<!-- Browser agent test page, served by example/form-fill-server.js (see the top of that file). Every URL here is
+     relative, so the page works under any path, such as /browser-kit/. -->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Browser agent test call</title>
+  <style>
+    :root { color-scheme: light; }
+    body { font-family: system-ui, -apple-system, sans-serif; max-width: 760px; margin: 32px auto; padding: 0 16px; color: #18181b; background: #fff; }
+    h2 { margin-bottom: 4px; }
+    h3 { margin: 0 0 6px; font-size: 16px; }
+    .card { border: 1px solid #e4e4e7; border-radius: 12px; padding: 16px; margin-top: 16px; }
+    label { display: block; margin: 10px 0 4px; font-weight: 600; font-size: 13px; color: #3f3f46; }
+    input, select, textarea { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; font-size: 14px; font-family: inherit; }
+    input[type=checkbox], input[type=radio] { width: auto; }
+    .modes label { display: flex; gap: 8px; align-items: flex-start; font-weight: 400; font-size: 14px; color: #18181b; margin: 6px 0; }
+    .row { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap; align-items: flex-end; }
+    .row > * { flex: 1 1 180px; }
+    button { padding: 10px 14px; font-size: 14px; border-radius: 8px; border: 1px solid #ccc; cursor: pointer; background: #fff; }
+    button:disabled { opacity: 0.5; cursor: default; }
+    button.call { background: #16a34a; border-color: #16a34a; color: #fff; }
+    button.call.active { background: #ef4444; border-color: #ef4444; }
+    .status { font-size: 13px; color: #52525b; margin-top: 8px; min-height: 18px; }
+    .status.bad { color: #b91c1c; }
+    .hint { font-size: 12px; color: #71717a; margin-top: 4px; }
+    .warn { font-size: 13px; color: #92400e; background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 8px 10px; margin: 8px 0; }
+    details > summary { cursor: pointer; font-weight: 600; margin-top: 8px; }
+    .pills { display: flex; gap: 8px; flex-wrap: wrap; }
+    .pills button { border-radius: 999px; padding: 6px 14px; }
+    .pills button[aria-pressed="true"] { background: #18181b; color: #fff; border-color: #18181b; }
+    .consent { display: flex; gap: 8px; align-items: flex-start; font-weight: 400; }
+    .result { margin-top: 10px; padding: 10px; border-radius: 8px; background: #f0fdf4; border: 1px solid #bbf7d0; font-size: 14px; }
+    .panel:not(:empty) { margin-top: 12px; }
+    #log { margin-top: 16px; font: 12px/1.5 ui-monospace, monospace; background: #f4f4f5; padding: 10px; border-radius: 8px; min-height: 100px; max-height: 260px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+    ul.received { font-size: 13px; padding-left: 18px; }
+  </style>
+</head>
+<body>
+  <h2>Browser agent test call</h2>
+  <div class="hint">Talk to an agent and watch it fill a form four ways.</div>
+
+  <section class="card">
+    <h3>Your account</h3>
+    <label for="apiKey">API key</label>
+    <input id="apiKey" type="password" autocomplete="off" placeholder="bn-…">
+    <div class="hint">Calls go to <span id="apiBase">…</span>. Your key stays in this page's server, in memory, for this browser only, and is dropped after two idle hours.</div>
+    <div class="row"><button id="connect">Connect</button></div>
+    <div id="accountStatus" class="status"></div>
+    <label for="voiceAgent">Demo agents copy their voice from</label>
+    <select id="voiceAgent" disabled><option>Connect first</option></select>
+  </section>
+
+  <section class="card">
+    <h3>1. Symphony buildathon form, filled by our browser</h3>
+    <div class="warn">Our browser fills the real form at bolna.ai/symphony/buildathon. Saying yes to the read-back sends a real application.</div>
+    <div class="modes" role="radiogroup" aria-label="How the form fills">
+      <label><input type="radio" name="symphonyMode" value="symphony_live" checked> Turn by turn: the form opens as the call starts and fills as you answer</label>
+      <label><input type="radio" name="symphonyMode" value="symphony"> All at the end: the agent takes the whole application, then the browser fills it in</label>
+    </div>
+    <div class="row">
+      <div><label for="symphonyAgent">Agent</label><select id="symphonyAgent" disabled></select></div>
+      <button data-create="symphony_live" disabled>Create turn-by-turn agent</button>
+      <button data-create="symphony" disabled>Create all-at-the-end agent</button>
+      <button class="call" data-call="symphony" disabled>📞 Call</button>
+    </div>
+    <div id="symphonyCreateStatus" class="status"></div>
+    <div id="symphonyPanel" class="panel"></div>
+  </section>
+
+  <section class="card">
+    <h3>2. This form, filled live in your tab</h3>
+    <div class="hint">The agent types into the form below while you talk; you can type too. It reads the form back, and submits only after your yes.</div>
+    <details id="tabFormBox">
+      <summary>Show the form</summary>
+      <div id="tabFormRoot"></div>
+    </details>
+    <div class="row">
+      <div><label for="pageAgent">Agent</label><select id="pageAgent" disabled></select></div>
+      <button data-create="page" disabled>Create in-tab agent</button>
+      <button class="call" data-call="page" disabled>📞 Call</button>
+    </div>
+    <div id="pageCreateStatus" class="status"></div>
+    <div id="pageStatus" class="status"></div>
+  </section>
+
+  <section class="card">
+    <h3>3. A signed-in app's form, filled by our browser</h3>
+    <div class="hint">Sign in to the demo app, then call: when the call starts, this page's server hands Bolna your sign-in, as an app's own server would, so our browser opens the form already signed in.</div>
+    <div class="row">
+      <button id="appSignIn">Sign in to the demo app</button>
+      <a id="appFormLink" href="app/apply" target="_blank" rel="noopener">Open the app's form</a>
+    </div>
+    <div id="appStatus" class="status">Not signed in.</div>
+    <div class="row">
+      <div><label for="appAgent">Agent</label><select id="appAgent" disabled></select></div>
+      <button data-create="app" disabled>Create app agent</button>
+      <button class="call" data-call="app" disabled>📞 Call</button>
+    </div>
+    <div id="appCreateStatus" class="status"></div>
+    <div id="appPanel" class="panel"></div>
+    <details><summary>What the app received</summary><ul id="appReceived" class="received"><li>Nothing yet.</li></ul></details>
+  </section>
+
+  <section class="card">
+    <h3>4. Bolna Bank loan application, filled by our browser</h3>
+    <div class="hint">A made-up bank's multi-screen loan form at <a href="https://bolna-bank-loan-demo.netlify.app/" target="_blank" rel="noopener">bolna-bank-loan-demo.netlify.app</a>; use made-up details. Turn by turn: our browser reads each screen back and moves on after your yes, and stops at the e-sign OTP and the EMI mandate, which only you can do. Watch it in the panel below: the copy in your own tab isn't the one being filled.</div>
+    <div class="row">
+      <div><label for="loanAgent">Agent</label><select id="loanAgent" disabled></select></div>
+      <button data-create="loan" disabled>Create loan agent</button>
+      <button class="call" data-call="loan" disabled>📞 Call</button>
+    </div>
+    <div id="loanCreateStatus" class="status"></div>
+    <div id="loanPanel" class="panel"></div>
+  </section>
+
+  <div id="log">idle</div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js" integrity="sha512-QVs8Lo43F9lSuBykadDb0oSXDL/BbZ588urWVCRwSIoewQv/Ewg1f84mK3U790bZ0FfhFa1YSQUmIhG+pIRKeg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js" integrity="sha512-6a1107rTlA4gYpgHAqbwLAtxmWipBdJFcq8y5S/aTge3Bp+VAklABm2LO+Kg51vOWR9JMZq1Ovjl5tpluNpTeQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script src="dist/bolna-web-call.min.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const log = (...parts) => { $('log').textContent += '\n' + parts.join(' '); $('log').scrollTop = $('log').scrollHeight; };
+    const setStatus = (id, text, bad = false) => { $(id).textContent = text; $(id).classList.toggle('bad', bad); };
+    const DEMO_NAMES = {
+      symphony: 'Browser agent demo (Symphony buildathon)',
+      symphony_live: 'Browser agent demo (Symphony buildathon, turn by turn)',
+      page: 'Browser agent demo (in-tab form)',
+      app: 'Browser agent demo (signed-in app)',
+      loan: 'Browser agent demo (Bolna Bank loan, turn by turn)',
+    };
+    // Each option's agent picker. Option 1 has a demo agent for each way of filling, chosen by its mode.
+    const PICKERS = ['symphony', 'page', 'app', 'loan'];
+    const symphonyMode = () => document.querySelector('[name=symphonyMode]:checked').value;
+    const pickerFor = (kind) => (kind.startsWith('symphony') ? 'symphony' : kind);
+    const demoNameFor = (picker) => DEMO_NAMES[picker === 'symphony' ? symphonyMode() : picker];
+    let agents = [];
+    let call = null;
+    let callOption = null;
+    let pageConnection = null;
+    let removePanel = null;
+
+    async function api(method, path, body) {
+      const response = await fetch(path, {
+        method,
+        headers: body ? { 'Content-Type': 'application/json' } : {},
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.message || 'HTTP ' + response.status);
+      return data;
+    }
+
+    // ---- the in-tab form: a React form like the Symphony site's, with option buttons ----
+    const h = React.createElement;
+    function Pills({ name, label, options, value, onPick }) {
+      return h('div', null,
+        h('label', { id: name + '-label' }, label),
+        h('div', { className: 'pills', 'data-bolna-field': name, role: 'group', 'aria-labelledby': name + '-label' },
+          options.map((option) => h('button', {
+            key: option, type: 'button', 'aria-pressed': value === option, onClick: () => onPick(option),
+          }, option))));
+    }
+    function Field({ name, label, type = 'text', required, value, onChange, multiline }) {
+      const props = { id: 'f-' + name, name, required, value: value || '', onChange: (e) => onChange(name, e.target.value) };
+      return h('div', null,
+        h('label', { htmlFor: 'f-' + name }, label + (required ? ' *' : '')),
+        multiline ? h('textarea', { ...props, rows: 3 }) : h('input', { ...props, type }));
+    }
+    function Application() {
+      const [values, setValues] = React.useState({});
+      const [result, setResult] = React.useState(null);
+      const set = (name, value) => setValues((v) => ({ ...v, [name]: value }));
+      const field = (name, label, extra = {}) => h(Field, { name, label, value: values[name], onChange: set, ...extra });
+      async function onSubmit(event) {
+        event.preventDefault();
+        try {
+          const { reference } = await api('POST', 'api/demo-submit', values);
+          setResult('Application received. Reference ' + reference + '.');
+          pageConnection?.reportSubmitted(reference);
+        } catch (err) {
+          setResult('Not sent: ' + err.message);
+          pageConnection?.reportFailed(err.message);
+        }
+      }
+      return h('form', { id: 'tabForm', onSubmit },
+        h(Pills, { name: 'team_size', label: 'Applying as', options: ['Solo', 'Team'], value: values.team_size, onPick: (v) => set('team_size', v) }),
+        values.team_size === 'Team' && field('team_name', 'Team name'),
+        values.team_size === 'Team' && field('teammates', 'Teammates (name and email, one per line)', { multiline: true }),
+        field('full_name', 'Full name', { required: true }),
+        field('email', 'Email', { type: 'email', required: true }),
+        field('phone', 'WhatsApp number with country code', { type: 'tel', required: true }),
+        field('city', 'City', { required: true }),
+        field('org', 'College or company', { required: true }),
+        field('profile_url', 'LinkedIn or GitHub link', { type: 'url' }),
+        h(Pills, { name: 'idea_decided', label: 'Decided on your idea?', options: ['Yes', 'Not yet'], value: values.idea_decided, onPick: (v) => set('idea_decided', v) }),
+        values.idea_decided === 'Yes' && field('project_name', 'Project name'),
+        values.idea_decided === 'Yes' && field('working_since', 'Working on it since'),
+        values.idea_decided === 'Yes' && field('idea', 'What are you building, and where does voice AI come in?', { multiline: true }),
+        h('label', { className: 'consent' },
+          h('input', { type: 'checkbox', name: 'contact_consent', required: true, checked: Boolean(values.contact_consent), onChange: (e) => set('contact_consent', e.target.checked) }),
+          'I agree to be contacted by Bolna about the Buildathon and Symphony *'),
+        h('button', { type: 'submit' }, 'Submit application'),
+        result && h('div', { className: 'result' }, result));
+    }
+    ReactDOM.createRoot($('tabFormRoot')).render(h(Application));
+
+    // ---- account and agents ----
+    function fillAgentSelect(picker, preferDemo = false) {
+      const select = $(picker + 'Agent');
+      const previous = select.value;
+      select.innerHTML = '';
+      const usable = agents.filter((a) => a.hearsUpdates);
+      for (const agent of usable) select.add(new Option(agent.name + ' · ' + agent.id.slice(0, 8), agent.id));
+      if (!usable.length) select.add(new Option('Create the demo agent →', ''));
+      const demo = usable.find((a) => a.name === demoNameFor(picker));
+      const keep = !preferDemo && usable.some((a) => a.id === previous);
+      select.value = keep ? previous : (demo || usable[0] || { id: '' }).id;
+      select.disabled = !usable.length;
+      document.querySelector(`[data-call="${picker}"]`).disabled = !usable.length;
+    }
+    for (const radio of document.querySelectorAll('[name=symphonyMode]')) {
+      radio.onchange = () => fillAgentSelect('symphony', true);
+    }
+
+    function showAgents(list) {
+      agents = list;
+      for (const picker of PICKERS) fillAgentSelect(picker);
+      const voice = $('voiceAgent');
+      voice.innerHTML = '';
+      for (const agent of agents.filter((a) => a.voice)) voice.add(new Option(agent.name + ' · ' + agent.id.slice(0, 8), agent.id));
+      voice.disabled = !voice.options.length;
+      for (const button of document.querySelectorAll('[data-create]')) button.disabled = voice.disabled;
+    }
+
+    $('connect').onclick = async () => {
+      $('connect').disabled = true;
+      setStatus('accountStatus', 'Connecting…');
+      try {
+        const { agents: list, browserAgent } = await api('POST', 'api/account', { apiKey: $('apiKey').value.trim() });
+        $('apiKey').value = '';
+        showAgents(list);
+        setStatus('accountStatus', 'Connected: ' + list.length + ' agents. Browser agent: ' + browserAgent + '.', browserAgent !== 'enabled');
+      } catch (err) {
+        setStatus('accountStatus', err.message, true);
+      } finally {
+        $('connect').disabled = false;
+      }
+    };
+
+    for (const button of document.querySelectorAll('[data-create]')) {
+      button.onclick = async () => {
+        const kind = button.dataset.create;
+        const statusId = pickerFor(kind) + 'CreateStatus';
+        button.disabled = true;
+        setStatus(statusId, 'Creating ' + DEMO_NAMES[kind] + '…');
+        try {
+          const created = await api('POST', 'api/demo-agents', { kind, voiceAgentId: $('voiceAgent').value });
+          if (kind.startsWith('symphony')) document.querySelector(`[name=symphonyMode][value="${kind}"]`).checked = true;
+          const { agents: list } = await api('GET', 'api/agents');
+          showAgents(list);
+          $(pickerFor(kind) + 'Agent').value = created.id;
+          setStatus(statusId, 'Created "' + created.name + '" and picked it.');
+        } catch (err) {
+          setStatus(statusId, err.message, true);
+        } finally {
+          button.disabled = $('voiceAgent').disabled;
+        }
+      };
+    }
+
+    // ---- the demo app's sign-in ----
+    async function refreshApp() {
+      const state = await api('GET', 'api/state');
+      setStatus('appStatus', state.appUser ? 'Signed in to the demo app as ' + state.appUser + '.' : 'Not signed in.');
+      if (!state.connected) return;
+      const { submissions } = await api('GET', 'api/app-submissions').catch(() => ({ submissions: [] }));
+      $('appReceived').innerHTML = '';
+      for (const s of submissions) {
+        const item = document.createElement('li');
+        item.textContent = s.reference + ' · ' + Object.entries(s.fields).map(([k, v]) => k + ': ' + v).join(', ');
+        $('appReceived').append(item);
+      }
+      if (!submissions.length) $('appReceived').innerHTML = '<li>Nothing yet.</li>';
+    }
+    $('appSignIn').onclick = async () => {
+      try {
+        await api('POST', 'app/signin', {});
+        await refreshApp();
+      } catch (err) {
+        setStatus('appStatus', err.message, true);
+      }
+    };
+
+    // ---- calls ----
+    function setCallButtons() {
+      for (const button of document.querySelectorAll('[data-call]')) {
+        const active = call && call.getState() !== 'ended' && call.getState() !== 'idle' && callOption === button.dataset.call;
+        button.textContent = active ? 'Hang up' : '📞 Call';
+        button.classList.toggle('active', Boolean(active));
+      }
+    }
+
+    async function startCall(option) {
+      if (call && call.getState() !== 'ended' && call.getState() !== 'idle') {
+        const wasOption = callOption;
+        await call.stop();
+        if (wasOption === option) return;
+      }
+      if (typeof BolnaWebCall === 'undefined') {
+        log('ERROR: the SDK bundle failed to load: run `npm run build` in the web-call repo, then reload.');
+        return;
+      }
+      const agentId = $(option + 'Agent').value;
+      if (!agentId) return log('Pick or create an agent first.');
+      if (option === 'app' && $('appStatus').textContent.startsWith('Not signed in')) return log('Sign in to the demo app first.');
+      if (removePanel) { removePanel(); removePanel = null; }
+      pageConnection?.detach();
+      pageConnection = null;
+
+      callOption = option;
+      const query = 'session?agent=' + encodeURIComponent(agentId) + (option === 'app' ? '&signin=1' : '');
+      call = new BolnaWebCall({ sessionUrl: new URL(query, location.href).href });
+      call.on('state-change', (state) => { log('state:', state); setCallButtons(); });
+      call.on('call-start', () => log('>>> connected (run_id ' + call.getRunId() + ')'));
+      call.on('call-end', ({ reason }) => { log('call ended:', reason); setCallButtons(); if (option === 'app') refreshApp(); });
+      call.on('error', (e) => log('ERROR', e.code + ':', e.message));
+      if (option === 'page') {
+        $('tabFormBox').open = true;
+        pageConnection = call.attachPage($('tabForm'));
+        call.on('page-update', (u) => {
+          const words = { connecting: 'Connecting the form…', ready: 'Ready: the agent fills fields as you talk.', typing: 'Typing ' + (u.field || '') + '…', confirming: 'Reading the form back to you…', submitting: 'You said yes: submitting…', submitted: 'Submitted. ' + (u.detail || ''), not_submitted: 'Not submitted: ' + (u.detail || ''), stopped: 'Call ended.' };
+          setStatus('pageStatus', words[u.state] + (u.detail && !['submitted', 'not_submitted'].includes(u.state) ? ' ' + u.detail : ''), u.state === 'not_submitted');
+        });
+        call.on('page-error', (e) => { setStatus('pageStatus', e.message, true); log('page:', e.code + ':', e.message); });
+      } else {
+        call.on('browser-ready', () => {
+          removePanel = BolnaWebCall.mountBrowserPanel(call, $(option + 'Panel'));
+          log('our browser is on this call: its progress shows above');
+        });
+        call.on('browser-error', (e) => log('browser view:', e.code + ':', e.message));
+      }
+      try { await call.start(); } catch {} finally { setCallButtons(); }
+    }
+    for (const button of document.querySelectorAll('[data-call]')) button.onclick = () => startCall(button.dataset.call);
+
+    api('GET', 'api/state').then((state) => {
+      $('apiBase').textContent = state.apiBase;
+      if (state.connected) {
+        setStatus('accountStatus', 'Connected with your key (' + state.keyHint + ').');
+        api('GET', 'api/agents').then(({ agents: list }) => showAgents(list)).catch((err) => setStatus('accountStatus', err.message, true));
+      }
+      refreshApp().catch(() => {});
+    });
+  </script>
+</body>
+</html>
