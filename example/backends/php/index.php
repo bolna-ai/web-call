@@ -15,10 +15,11 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST' || parse_url($_SERVER['REQUEST_URI'], 
 }
 // Add YOUR user auth here so only signed-in users can start calls.
 
-$in = json_decode(file_get_contents('php://input') ?: '{}', true);
+// decode as objects so {} and {"0": ...} stay JSON objects
+$in = json_decode(file_get_contents('php://input') ?: '{}');
 $payload = ['agent_id' => $agentId];
-if (is_array($in) && isset($in['user_data'])) {
-    $payload['user_data'] = $in['user_data']; // forwarded from the SDK's userData
+if (is_object($in) && isset($in->user_data)) {
+    $payload['user_data'] = $in->user_data; // forwarded from the SDK's userData
 }
 
 $ch = curl_init("$apiBase/web-call/session");

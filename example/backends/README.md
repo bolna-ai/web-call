@@ -22,9 +22,9 @@ Put your own user auth in front of the route so only signed-in users can start c
 | Java (JDK only) | [`java/BolnaSession.java`](java/BolnaSession.java) | `java BolnaSession.java` (JDK 17+) |
 | Java (Spring Boot) | [`java/SpringBolnaSessionController.java`](java/SpringBolnaSessionController.java) | drop into your app; set `bolna.api-key` / `bolna.agent-id` |
 | PHP | [`php/index.php`](php/index.php) | `php -S localhost:8787 index.php` |
-| PHP (Laravel) | [`php/LaravelBolnaSessionController.php`](php/LaravelBolnaSessionController.php) | drop into `app/Http/Controllers` |
+| PHP (Laravel) | [`php/LaravelBolnaSessionController.php`](php/LaravelBolnaSessionController.php) | save as `app/Http/Controllers/BolnaSessionController.php` |
 | Ruby (Sinatra) | [`ruby-sinatra/app.rb`](ruby-sinatra/app.rb) | `bundle install && bundle exec ruby app.rb` |
-| Ruby (Rails) | [`ruby-sinatra/rails_bolna_sessions_controller.rb`](ruby-sinatra/rails_bolna_sessions_controller.rb) | drop into `app/controllers` |
+| Ruby (Rails) | [`ruby-sinatra/rails_bolna_sessions_controller.rb`](ruby-sinatra/rails_bolna_sessions_controller.rb) | save as `app/controllers/bolna_sessions_controller.rb` |
 | C# (ASP.NET Core) | [`csharp-aspnet/Program.cs`](csharp-aspnet/Program.cs) | `dotnet run` (.NET 8+) |
 
 Every runnable example reads `BOLNA_API_KEY`, `BOLNA_AGENT_ID`, `PORT` (default `8787`) and
